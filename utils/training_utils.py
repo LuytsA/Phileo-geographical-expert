@@ -4,6 +4,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import matplotlib.pyplot as plt
+import buteo as beo
+import tqdm
 
 class TiledMSE(nn.Module):
     """
@@ -24,6 +27,28 @@ class TiledMSE(nn.Module):
         weighted = (sum_mse * (1 - self.bias)) + (mse * self.bias)
         
         return weighted 
+    
+class GeographicalLoss(nn.Module):
+    """
+    Combination of coordinate prediction (regression) and region/climate prediction (classification)
+    """
+    def __init__(self, n_classes):
+        super(GeographicalLoss, self).__init__()
+        self.crossentropy_loss = nn.CrossEntropyLoss()
+        self.mse_loss = nn.MSELoss()
+        self.n_classes = n_classes
+        self.weights = [1,1]
+
+    def forward(self, y_pred, y_true):
+
+        y_pred_logits,y_true_region = y_pred[:,-self.n_classes:], y_true[:,-1].type(torch.LongTensor).cuda()
+        coord_pred, coord_true = y_pred[:,:3], y_true[:,:3]
+        
+        region_loss = self.crossentropy_loss(y_pred_logits,y_true_region)
+        coordinate_loss = self.mse_loss(coord_pred,coord_true)
+
+        
+        return self.weights[0]*coordinate_loss + self.weights[1]*region_loss, region_loss,coordinate_loss
     
            
 class LayerNorm(nn.Module):
@@ -294,3 +319,106 @@ def convert_torch_to_float(tensor):
         return float(tensor)
     else:
         raise ValueError("Cannot convert tensor to float")
+
+
+
+def render_s2_as_rgb(arr, channel_first=False):
+    # If there are nodata values, lets cast them to zero.
+    if np.ma.isMaskedArray(arr):
+        arr = np.ma.getdata(arr.filled(0))
+
+    if channel_first:
+        arr = beo.channel_first_to_last(arr)
+    # Select only Blue, green, and red. Then invert the order to have R-G-B
+    rgb_slice = arr[:, :, 0:3][:, :, ::-1]
+
+    # Clip the data to the quantiles, so the RGB render is not stretched to outliers,
+    # Which produces dark images.
+    rgb_slice = np.clip(
+        rgb_slice,
+        np.quantile(rgb_slice, 0.02),
+        np.quantile(rgb_slice, 0.98),
+    )
+
+    # The current slice is uint16, but we want an uint8 RGB render.
+    # We normalise the layer by dividing with the maximum value in the image.
+    # Then we multiply it by 255 (the max of uint8) to be in the normal RGB range.
+    rgb_slice = (rgb_slice / rgb_slice.max()) * 255.0
+
+    # We then round to the nearest integer and cast it to uint8.
+    rgb_slice = np.rint(rgb_slice).astype(np.uint8)
+
+    return rgb_slice
+
+def decode_coordinates(encoded_coords):
+    lat_enc,long_sin,long_cos = encoded_coords
+    lat = lat_enc*180-90
+    long = np.arctan2((2*long_sin-1),(2*long_cos-1))*360/(2*np.pi)
+    return np.array([lat,long])
+
+def encode_coordinates(coords):
+    lat,long = coords
+    lat = (lat + 90)/180
+    long_sin = (np.sin(long*2*np.pi/360)+1)/2
+    long_cos = (np.cos(long*2*np.pi/360)+1)/2
+
+    return np.array([lat,long_sin,long_cos], dtype=np.float32)
+
+import config_geography
+regions = config_geography.regions
+regions_inv = config_geography.region_inv
+def visualise(x, y, y_pred=None, images=5, channel_first=False, vmin=0, vmax=1, save_path=None):
+    rows = images
+    if y_pred is None:
+        columns = 1
+    else:
+        columns = 1
+    i = 0
+    fig = plt.figure(figsize=(10 * columns, 10 * rows))
+
+    for idx in range(0, images):
+        arr = x[idx]
+        rgb_image = render_s2_as_rgb(arr, channel_first)
+
+        i = i + 1
+        fig.add_subplot(rows, columns, i)
+        
+
+        lat_pred,long_pred = decode_coordinates(y_pred[idx][:3])
+        lat,long = decode_coordinates(y[idx][:3])
+        region_pred = np.argmax([y_pred[idx][3:]])
+        region = y[idx][-1]
+        s1 = f"pred  : lat-long = {np.round(lat_pred,1),np.round(long_pred,1)} \n region - {regions_inv[int(region_pred)]}"
+        s2 = f"target: lat-long = {np.round(lat,1),np.round(long,1)} \n region - {regions_inv[int(region)]}"
+
+        plt.text(25, 25, s1,fontsize=18, bbox=dict(fill=True))
+        plt.text(25, 35, s2,fontsize=18, bbox=dict(fill=True))
+        plt.imshow(rgb_image)
+        plt.axis('on')
+        plt.grid()
+
+        # i = i + 1
+        # fig.add_subplot(rows, columns, i)
+        # plt.imshow(y[idx], vmin=vmin, vmax=vmax, cmap='magma')
+        # plt.axis('on')
+        # plt.grid()
+
+        # if y_pred is not None:
+        #     i = i + 1
+        #     fig.add_subplot(rows, columns, i)
+        #     plt.imshow(y_pred[idx], vmin=vmin, vmax=vmax, cmap='magma')
+        #     plt.axis('on')
+        #     plt.grid()
+
+    fig.tight_layout()
+
+    del x
+    del y
+    del y_pred
+
+    if save_path is not None:
+        plt.savefig(save_path)
+    plt.close()
+
+
+
