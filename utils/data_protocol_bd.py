@@ -21,46 +21,46 @@ def protocol_all(folder: str, y: str= 'y'):
     Loads all the data from the data folder.
     """
 
-    if y == 'geography':
-        x_train_files = sorted(glob(os.path.join(folder, f"*train_s2.npy")))
-        x_val_files = sorted(glob(os.path.join(folder, f"*val_s2.npy")))
-        x_test_files = sorted(glob(os.path.join(folder, f"*test_s2.npy")))
+    # if y == 'geography':
+    #     x_train_files = sorted(glob(os.path.join(folder, f"*train_s2.npy")))
+    #     x_val_files = sorted(glob(os.path.join(folder, f"*val_s2.npy")))
+    #     x_test_files = sorted(glob(os.path.join(folder, f"*test_s2.npy")))
 
-        x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
-        x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
-        x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
+    #     x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
+    #     x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
+    #     x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
 
-        y_part = []
-        with open('/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/tiles_coordinates.json') as fp:
-            tiles_coord = json.load(fp)
-        for part in ['train','test','val']:
-            ff = sorted(glob(os.path.join(folder, f"*{part}_s2.npy")))
-            tile_names = [f.split('/')[-1].split(f'_{part}_')[0] for f in ff]
-            tile_shapes = [np.load(f, mmap_mode='r').shape[0] for f in ff]
-            regions = [region_map[f.split('_')[0]] for f in tile_names]
-            assert len(tile_names)==len(tile_shapes)
-            y_part.append(beo.MultiArray([ np.repeat(np.array([tiles_coord[n]+[r]]),s, axis=0) for n,s,r in zip(tile_names,tile_shapes,regions)]))
+    #     y_part = []
+    #     with open('/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/tiles_coordinates.json') as fp:
+    #         tiles_coord = json.load(fp)
+    #     for part in ['train','test','val']:
+    #         ff = sorted(glob(os.path.join(folder, f"*{part}_s2.npy")))
+    #         tile_names = [f.split('/')[-1].split(f'_{part}_')[0] for f in ff]
+    #         tile_shapes = [np.load(f, mmap_mode='r').shape[0] for f in ff]
+    #         regions = [region_map[f.split('_')[0]] for f in tile_names]
+    #         assert len(tile_names)==len(tile_shapes)
+    #         y_part.append(beo.MultiArray([ np.repeat(np.array([tiles_coord[n]+[r]]),s, axis=0) for n,s,r in zip(tile_names,tile_shapes,regions)]))
         
-        y_train, y_test, y_val = y_part
+    #     y_train, y_test, y_val = y_part
 
-    else:
-        x_train_files = sorted(glob(os.path.join(folder, f"*train_s2.npy")))
-        y_train_files = sorted(glob(os.path.join(folder, f"*train_label_{y}.npy")))
+# else:
+    x_train_files = sorted(glob(os.path.join(folder, f"*train_s2.npy")))
+    y_train_files = sorted(glob(os.path.join(folder, f"*train_label_{y}.npy")))
 
-        x_val_files = sorted(glob(os.path.join(folder, f"*val_s2.npy")))
-        y_val_files = sorted(glob(os.path.join(folder, f"*val_label_{y}.npy")))
+    x_val_files = sorted(glob(os.path.join(folder, f"*val_s2.npy")))
+    y_val_files = sorted(glob(os.path.join(folder, f"*val_label_{y}.npy")))
 
-        x_test_files = sorted(glob(os.path.join(folder, f"*test_s2.npy")))
-        y_test_files = sorted(glob(os.path.join(folder, f"*test_label_{y}.npy")))
+    x_test_files = sorted(glob(os.path.join(folder, f"*test_s2.npy")))
+    y_test_files = sorted(glob(os.path.join(folder, f"*test_label_{y}.npy")))
 
-        x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
-        y_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_train_files])
+    x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
+    y_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_train_files])
 
-        x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
-        y_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_val_files])
+    x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
+    y_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_val_files])
 
-        x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
-        y_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_test_files])
+    x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
+    y_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_test_files])
 
     assert len(x_train) == len(y_train) and len(x_test) == len(y_test) and len(x_val) == len(
         y_val), "Lengths of x and y do not match."
@@ -113,33 +113,33 @@ def protocol_split(folder: str, split_percentage: float = 0.2, regions: list = N
 
 
 
-    if y == 'geography':
+    # if y == 'geography':
 
-        x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
-        x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
-        x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
+    #     x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
+    #     x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
+    #     x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
 
-        y_part = []
-        with open('/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/tiles_coordinates.json') as fp:
-            tiles_coord = json.load(fp)
-        for part, ff in zip(['train','test','val'],[x_train_files,x_test_files,x_val_files]):
-            tile_names = [f.split('/')[-1].split(f'_{part}_')[0] for f in ff]
-            tile_shapes = [np.load(f, mmap_mode='r').shape[0] for f in ff]
-            regions = [region_map[f.split('_')[0]] for f in tile_names]
-            assert len(tile_names)==len(tile_shapes)
-            y_part.append(beo.MultiArray([ np.repeat(np.array([tiles_coord[n]+[r]]),s, axis=0) for n,s,r in zip(tile_names,tile_shapes,regions)]))
+    #     y_part = []
+    #     with open('/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/tiles_coordinates.json') as fp:
+    #         tiles_coord = json.load(fp)
+    #     for part, ff in zip(['train','test','val'],[x_train_files,x_test_files,x_val_files]):
+    #         tile_names = [f.split('/')[-1].split(f'_{part}_')[0] for f in ff]
+    #         tile_shapes = [np.load(f, mmap_mode='r').shape[0] for f in ff]
+    #         regions = [region_map[f.split('_')[0]] for f in tile_names]
+    #         assert len(tile_names)==len(tile_shapes)
+    #         y_part.append(beo.MultiArray([ np.repeat(np.array([tiles_coord[n]+[r]]),s, axis=0) for n,s,r in zip(tile_names,tile_shapes,regions)]))
         
-        y_train, y_test, y_val = y_part
+    #     y_train, y_test, y_val = y_part
 
-    else:
-        x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
-        y_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_train_files])
+    # else:
+    x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
+    y_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_train_files])
 
-        x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
-        y_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_val_files])
+    x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
+    y_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_val_files])
 
-        x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
-        y_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_test_files])
+    x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
+    y_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_test_files])
 
     assert len(x_train) == len(y_train) and len(x_test) == len(y_test) and len(x_val) == len(
         y_val), "Lengths of x and y do not match."
@@ -177,33 +177,33 @@ def protocol_regions(folder: str, regions: list = None, y: str = 'y'):
         y_test_files = y_test_files + sorted(glob(os.path.join(folder, f"{region}*test_label_{y}.npy")))
 
 
-    if y == 'geography':
+    # if y == 'geography':
 
-        x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
-        x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
-        x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
+    #     x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
+    #     x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
+    #     x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
 
-        y_part = []
-        with open('/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/tiles_coordinates.json') as fp:
-            tiles_coord = json.load(fp)
-        for part, ff in zip(['train','test','val'],[x_train_files,x_test_files,x_val_files]):
-            tile_names = [f.split('/')[-1].split(f'_{part}_')[0] for f in ff]
-            tile_shapes = [np.load(f, mmap_mode='r').shape[0] for f in ff]
-            regions = [region_map[f.split('_')[0]] for f in tile_names]
-            assert len(tile_names)==len(tile_shapes)
-            y_part.append(beo.MultiArray([ np.repeat(np.array([tiles_coord[n]+[r]]),s, axis=0) for n,s,r in zip(tile_names,tile_shapes,regions)]))
+    #     y_part = []
+    #     with open('/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/tiles_coordinates.json') as fp:
+    #         tiles_coord = json.load(fp)
+    #     for part, ff in zip(['train','test','val'],[x_train_files,x_test_files,x_val_files]):
+    #         tile_names = [f.split('/')[-1].split(f'_{part}_')[0] for f in ff]
+    #         tile_shapes = [np.load(f, mmap_mode='r').shape[0] for f in ff]
+    #         regions = [region_map[f.split('_')[0]] for f in tile_names]
+    #         assert len(tile_names)==len(tile_shapes)
+    #         y_part.append(beo.MultiArray([ np.repeat(np.array([tiles_coord[n]+[r]]),s, axis=0) for n,s,r in zip(tile_names,tile_shapes,regions)]))
         
-        y_train, y_test, y_val = y_part
+    #     y_train, y_test, y_val = y_part
     
-    else:
-        x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
-        y_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_train_files])
+# else:
+    x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
+    y_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_train_files])
 
-        x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
-        y_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_val_files])
+    x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
+    y_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_val_files])
 
-        x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
-        y_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_test_files])
+    x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
+    y_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_test_files])
 
     assert len(x_train) == len(y_train) and len(x_test) == len(y_test) and len(x_val) == len(
         y_val), "Lengths of x and y do not match."

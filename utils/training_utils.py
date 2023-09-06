@@ -7,6 +7,9 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import buteo as beo
 import tqdm
+import config_geography
+pos_feature_pred = config_geography.feature_positions_predictions
+pos_feature_label = config_geography.feature_positions_label
 
 class TiledMSE(nn.Module):
     """
@@ -36,19 +39,45 @@ class GeographicalLoss(nn.Module):
         super(GeographicalLoss, self).__init__()
         self.crossentropy_loss = nn.CrossEntropyLoss()
         self.mse_loss = nn.MSELoss()
-        self.n_classes = n_classes
-        self.weights = [1,1]
+        self.weights = np.array([1,1,1])
+        self.weights = self.weights/self.weights.sum()
+        self.climate_classes = {}
+
+        kg_map = config_geography.kg_map
+        for k in kg_map.keys():
+            climate_class = kg_map[k]['climate_class']
+            if climate_class in self.climate_classes:
+                self.climate_classes[climate_class] = self.climate_classes[climate_class]+[k]
+            else: self.climate_classes[climate_class] = [k]
+
+
+    def kg_loss(self,kg_pred_logits,kg_true, weight=0.5):
+        superclass_pred_logits = torch.zeros((kg_pred_logits.shape[0],len(self.climate_classes)))
+        superclass_true = torch.zeros((kg_true.shape[0],len(self.climate_classes)))
+
+        for k in self.climate_classes.keys():
+            superclass_pred_logits[:,k] = torch.mean(kg_pred_logits[:,self.climate_classes[k]], axis=1)
+            superclass_true[:,k] = torch.mean(kg_true[:,self.climate_classes[k]], axis=1)
+        
+        superclass_loss = self.crossentropy_loss(superclass_pred_logits,superclass_true)
+        class_loss = self.crossentropy_loss(kg_pred_logits,kg_true)
+
+        return weight*class_loss + (1-weight)*superclass_loss
+
 
     def forward(self, y_pred, y_true):
 
-        y_pred_logits,y_true_region = y_pred[:,-self.n_classes:], y_true[:,-1].type(torch.LongTensor).cuda()
-        coord_pred, coord_true = y_pred[:,:3], y_true[:,:3]
-        
-        region_loss = self.crossentropy_loss(y_pred_logits,y_true_region)
-        coordinate_loss = self.mse_loss(coord_pred,coord_true)
+        region_pred_logits,region_true = y_pred[:,pos_feature_pred['region']], y_true[:,pos_feature_label['post_aug']['region']].type(torch.LongTensor).cuda()
+        coord_pred, coord_true = y_pred[:,pos_feature_pred['coords']], y_true[:,pos_feature_label['post_aug']['coords']]
+        kg_pred_logits,kg_true = y_pred[:,pos_feature_pred['kg']], y_true[:,pos_feature_label['post_aug']['kg']]
 
         
-        return self.weights[0]*coordinate_loss + self.weights[1]*region_loss, region_loss,coordinate_loss
+        region_loss = self.crossentropy_loss(region_pred_logits,region_true.squeeze())
+        coordinate_loss = self.mse_loss(coord_pred,coord_true)
+        kg_loss = self.kg_loss(kg_pred_logits,kg_true)
+
+        
+        return self.weights[0]*coordinate_loss + self.weights[1]*region_loss+ self.weights[2]*kg_loss, region_loss,coordinate_loss, kg_loss
     
            
 class LayerNorm(nn.Module):
@@ -382,14 +411,24 @@ def visualise(x, y, y_pred=None, images=5, channel_first=False, vmin=0, vmax=1, 
 
         i = i + 1
         fig.add_subplot(rows, columns, i)
-        
 
-        lat_pred,long_pred = decode_coordinates(y_pred[idx][:3])
-        lat,long = decode_coordinates(y[idx][:3])
-        region_pred = np.argmax([y_pred[idx][3:]])
-        region = y[idx][-1]
-        s1 = f"pred  : lat-long = {np.round(lat_pred,1),np.round(long_pred,1)} \n region - {regions_inv[int(region_pred)]}"
-        s2 = f"target: lat-long = {np.round(lat,1),np.round(long,1)} \n region - {regions_inv[int(region)]}"
+        region_pred_logits,region = y_pred[idx,pos_feature_pred['region']], y[idx,pos_feature_label['post_aug']['region']]
+        coord_pred, coord_true = y_pred[idx,pos_feature_pred['coords']], y[idx,pos_feature_label['post_aug']['coords']]
+        kg_pred_logits,kg_true = y_pred[idx,pos_feature_pred['kg']], y[idx,pos_feature_label['post_aug']['kg']]
+        
+        
+        # region_pred_logits,region = y_pred[idx,-8:], y[idx,34]
+        # coord_pred, coord_true = y_pred[idx,-11:-8], y[idx,-11:-8]
+        # kg_pred_logits,kg_true = y_pred[idx,:31], y[idx,:31]
+
+
+        lat_pred,long_pred = decode_coordinates(coord_pred)
+        lat,long = decode_coordinates(coord_true)
+        region_pred = np.argmax(region_pred_logits)
+        climate_pred = config_geography.kg_map[int(np.argmax([kg_pred_logits]))]['climate_class_str']
+        climate = config_geography.kg_map[int(np.argmax([kg_true]))]['climate_class_str']
+        s1 = f"pred  : lat-long = {np.round(lat_pred,1),np.round(long_pred,1)} \n region - {regions_inv[int(region_pred)]} \n climate - {climate_pred}"
+        s2 = f"target: lat-long = {np.round(lat,1),np.round(long,1)} \n region - {regions_inv[int(region)]} \n climate - {climate}"
 
         plt.text(25, 25, s1,fontsize=18, bbox=dict(fill=True))
         plt.text(25, 35, s2,fontsize=18, bbox=dict(fill=True))

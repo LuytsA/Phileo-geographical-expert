@@ -24,12 +24,12 @@ if __name__ == "__main__":
     num_workers = 6
     split_percentage=1
     REGIONS =['north-america','japan', 'east-africa', 'europe','eq-guinea','south-america', 'nigeria', 'senegal']
-    DATA_FOLDER = '/home/andreas/vscode/GeoSpatial/Phileo-downstream-tasks/data_landcover' #'/home/lcamilleri/data/s12_buildings/data_patches/'
+    DATA_FOLDER = '/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/data_geography' #'/home/andreas/vscode/GeoSpatial/Phileo-downstream-tasks/data_landcover' #'/home/lcamilleri/data/s12_buildings/data_patches/'
     criterion = GeographicalLoss(n_classes=len(config_geography.regions.keys()))#nn.MSELoss() #nn.CrossEntropyLoss() # vit_mse_losses(n_patches=4)
     lr_scheduler = None #'reduce_on_plateau' # None, 'reduce_on_plateau', 'cosine_annealing'
-    augmentations=False
+    augmentations= False
 
-    model = Core_tiny(input_dim=10, output_dim=3+8,) #ViT(chw=(10, 64, 64),  n_patches=4, n_blocks=2, hidden_d=768, n_heads=12)# SimpleUnet(input_dim=10, output_dim=1) #ViT(chw=(10, 64, 64),  n_patches=4, n_blocks=2, hidden_d=768, n_heads=12)# SimpleUnet(input_dim=10, output_dim=1) # SimpleUnet()
+    model = Core_tiny(input_dim=10, output_dim=31+3+8,) #ViT(chw=(10, 64, 64),  n_patches=4, n_blocks=2, hidden_d=768, n_heads=12)# SimpleUnet(input_dim=10, output_dim=1) #ViT(chw=(10, 64, 64),  n_patches=4, n_blocks=2, hidden_d=768, n_heads=12)# SimpleUnet(input_dim=10, output_dim=1) # SimpleUnet()
 
     # model = DiamondNet(
     #     input_dim=10,
@@ -52,7 +52,7 @@ if __name__ == "__main__":
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    model = torch.compile(model)#, mode='reduce-overhead')
+    # model = torch.compile(model)#, mode='reduce-overhead')
     x_train, y_train, x_val, y_val, x_test, y_test = data_protocol_bd.protocol_split(folder=DATA_FOLDER,
                                                                                         regions=REGIONS,
                                                                                         y='geography',
