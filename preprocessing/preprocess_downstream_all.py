@@ -1,21 +1,62 @@
 import os
 import sys; sys.path.append("./")
-import random
-import csv
 import numpy as np
 from glob import glob
 from tqdm import tqdm
 import glob 
 import buteo as bo
-from matplotlib import pyplot as plt
 import json
 from datetime import date
 import pandas as pd
 from functools import partial
 import concurrent.futures
-import config_geography
+import gc
 
-LABELS = ['label_roads','label_geography','label_building','label_lc']
+LABELS = ['label_roads','label_kg','label_building','label_lc', 'label_coords', 'label_time']
+
+
+def merge_labels_to_geolabel(
+        label_paths:tuple,
+        dst_folder:str,
+        n_kg_classes:int = 31
+    ):
+
+    '''
+    Merge created labels for Koppen-Geiger climate zones, encoded coordinates and encoded day_of_year to a single label of size n_kg_classes+3+2. 
+    The input kg_labels have shape (n_patches, patch_size, patch_size,1) while coordinate labels are (n_patches,3). 
+    Before concatenating the labels the kg_labels is transformed to a shape of (n_patches, n_kg_classes) by turning the spatial information into a average occurence in the patch for each climate class.
+
+    label_paths: (label_kg_path, label_coordinate_path, label_time_path)
+    dst_folder: folder to save the new geo_label
+    n_kg_classes: number of Koppen-Geiger climate classes
+    '''
+
+    label_kg_path = label_paths[0]
+    label_coordinate_path = label_paths[1]
+    label_time_path = label_paths[2]
+
+    tile_kg = label_kg_path.split('/')[-1].split('_label_kg.npy')[0]
+    tile_co = label_coordinate_path.split('/')[-1].split('_label_coords.npy')[0]
+    tile_time = label_time_path.split('/')[-1].split('_label_time.npy')[0]
+
+    assert tile_kg==tile_co, f"Labels must be from the same tile but got {tile_kg} and {tile_co}"
+    assert tile_time==tile_co, f"Labels must be from the same tile but got {tile_time} and {tile_co}"
+
+
+    kg_patches,coordinate_label, time_label = np.load(label_kg_path),np.load(label_coordinate_path), np.load(label_time_path)
+
+    # count occurence of each label. Final label array consists of the weighted occurences for each label
+    kg_label =np.zeros((kg_patches.shape[0],n_kg_classes))
+    for i in range(kg_patches.shape[0]):
+        u = np.unique(kg_patches[i], return_counts=True,)
+        kg_label[i,u[0]] = u[1]/np.sum(u[1])
+
+    geo_label = np.concatenate([kg_label,coordinate_label, time_label],axis=-1)
+
+    out_path =  os.path.join(dst_folder, f"{tile_kg}_label_geo.npy")
+    np.save(out_path,geo_label)
+
+
 
 def select_and_save_patches(
         tile:str,
@@ -63,7 +104,7 @@ def select_and_save_patches(
     MAX_CLOUD_COVER = 0.1
 
     # record metadata about each tile, more will be added throughout the processing
-    metadata = {'tile':tile, 'bands_kept':BANDS_TO_KEEP, 'SCL_cloud_classes':SCL_CLOUD_BANDS,
+    metadata = {'tile':tile, 'bands_kept':BANDS_TO_KEEP, 'SCL_cloud_classes':SCL_CLOUD_BANDS, 'timeseries_length':len(s2_patches),
                 'max_allowed_cloud_cover':MAX_CLOUD_COVER, 'partition':partition, 'val_split_ratio':val_split_ratio if partition=='train' else None,}  
 
 
@@ -74,28 +115,28 @@ def select_and_save_patches(
         selected_s2_val = []
 
     timeseries_poi = []
-    for k in range(len(s2_patches)):
+    for s2_arr in s2_patches:
 
-        s2_arr = s2_patches[k]
 
-        print(tile, s2_arr.shape)
 
         s2_clouds =np.isin(s2_arr[:,:,:,0],SCL_CLOUD_BANDS) # band 0 contains the SCL classes which can indicate the amount of cloud cover
         im_poi = np.where(np.mean(s2_clouds, axis=(1,2))<MAX_CLOUD_COVER)[0]
         timeseries_poi.append(im_poi)
 
-        print(im_poi[:5])
+        del s2_clouds
+        gc.collect()
+        
         if len(im_poi)==0:
             continue 
 
-        s2_patches_tmp = s2_arr[im_poi][:,:,:,BANDS_TO_KEEP]
+        s2_arr = s2_arr[im_poi][:,:,:,BANDS_TO_KEEP]
 
         if partition=='train':
-            idx_val = int(s2_patches_tmp.shape[0] * (1 - val_split_ratio))
-            selected_s2_val.append(s2_patches_tmp[idx_val:])
-            s2_patches_tmp = s2_patches_tmp[:idx_val]
+            idx_val = int(s2_arr.shape[0] * (1 - val_split_ratio))
+            selected_s2_val.append(s2_arr[idx_val:])
+            s2_arr = s2_arr[:idx_val]
 
-        selected_s2.append(s2_patches_tmp) 
+        selected_s2.append(s2_arr) 
 
     selected_s2 = np.concatenate(selected_s2)
 
@@ -106,14 +147,17 @@ def select_and_save_patches(
         np.save(f'{dst_folder}/{tile}_train_s2.npy', selected_s2)
         np.save(f'{dst_folder}/{tile}_val_s2.npy', selected_s2_val)
 
-        len_selected_s2 = selected_s2_val.shape[0]+selected_s2.shape[0]
-        selected_shape_s2 = (len_selected_s2,) + selected_s2.shape[1:]
-
+        len_selected_s2 = selected_s2.shape[0]
+        len_selected_s2_val = selected_s2_val.shape[0]
+        selected_shape_s2 = (len_selected_s2+len_selected_s2_val,) + selected_s2.shape[1:]
+        del selected_s2_val
     else:
         np.save(f'{dst_folder}/{tile}_test_s2.npy', selected_s2)
         selected_shape_s2 = selected_s2.shape
+        len_selected_s2 = selected_shape_s2[0]
 
-        
+    del selected_s2
+    gc.collect()
 
     ## Process labels
     for label_name, label_patches in label_patches_dict.items():
@@ -134,12 +178,18 @@ def select_and_save_patches(
             selected_labels.append(label_patches_tmp) 
 
         selected_labels = np.concatenate(selected_labels)
-        assert selected_labels.shape[0] == selected_s2.shape[0], f"Number of patches for labels and images do not match for {tile}."
+        assert selected_labels.shape[0] == len_selected_s2, f"Number of patches for labels and images do not match for {tile}."
+
+        if label_name in ['label_coords','label_time']: # average coordinates over spatial patch to have 1 coordinate label for the patch
+            selected_labels = np.mean(selected_labels, axis=(1,2))
 
         # save the labels to .np files
         if partition=='train':
             selected_labels_val = np.concatenate(selected_labels_val)
-            assert selected_labels_val.shape[0] == selected_s2_val.shape[0],  f"Number of patches for labels and images do not match for {tile}."
+            assert selected_labels_val.shape[0] == len_selected_s2_val,  f"Number of patches for labels and images do not match for {tile}."
+
+            if label_name in ['label_coords','label_time']:
+                selected_labels_val = np.mean(selected_labels_val, axis=(1,2))
 
             np.save(f'{dst_folder}/{tile}_train_{label_name}.npy', selected_labels)
             np.save(f'{dst_folder}/{tile}_val_{label_name}.npy', selected_labels_val)
@@ -152,11 +202,10 @@ def select_and_save_patches(
             selected_shape_label = selected_labels.shape
 
         metadata[f'{label_name}_shape'] = tuple(selected_shape_label)
-        metadata['fraction_images_kept'] = float(selected_shape_s2[0]/(len(timeseries_poi)*label_shape[0]))
+    metadata['fraction_images_kept'] = float(selected_shape_s2[0]/(len(timeseries_poi)*label_shape[0]))
     
 
-    # create output folder 
-    os.makedirs(f'{dst_folder}/metadata', exist_ok=True)
+
     
     with open(f'{dst_folder}/metadata/{tile}.json', 'w') as fp:
         json.dump(metadata, fp)
@@ -203,8 +252,10 @@ def process_tile(
     -------
     None
     '''
+    # create output folder 
+    os.makedirs(f'{folder_dst}/metadata', exist_ok=True)
 
-    timeseries_s2_raster = glob.glob(f'{folder_src}/{tile}_*[0-9].tif')
+    timeseries_s2_raster = glob.glob(f'{folder_src}/{tile}_s2.tif') #glob.glob(f'{folder_src}/{tile}_*[0-9].tif')
     labels_raster = {}
     for label in LABELS:
         label_path = f'{folder_src}/{tile}_{label}.tif'
@@ -233,6 +284,10 @@ def process_tile(
     except Exception as e:
         print(f'WARNING: tile {tile} failed with error: \n',e)
 
+        metadata = {'tile':tile, "error_msg":repr(e)}
+        with open(f'{folder_dst}/metadata/{tile}.json', 'w') as fp:
+            json.dump(metadata, fp)
+
 
 def process_data(
         folder_src: str,
@@ -241,6 +296,7 @@ def process_data(
         overlaps: int = 1,
         patch_size: int = 128,
         val_split_ratio: float = 0.1,
+        create_geo_label: bool = False,
         test_locations: list = None,
         train_locations: list = None,
         num_workers: int = None
@@ -304,6 +360,22 @@ def process_data(
         list(tqdm(executor.map(proc, test_locations), total=len(test_locations)))
 
 
+    if create_geo_label:
+        import config_geography
+        n_kg_classes = len(config_geography.kg_map.keys())
+
+        paths_label_coordinates = glob.glob(f"{folder_dst}/*_label_coords.npy")
+        paths_label_kg = glob.glob(f"{folder_dst}/*_label_kg.npy")
+        paths_label_time = glob.glob(f"{folder_dst}/*_label_time.npy")
+        assert len(paths_label_coordinates)==len(paths_label_kg), 'number of coordinate labels and kg labels do not match'
+        assert len(paths_label_coordinates)==len(paths_label_time), 'number of coordinate labels and time labels do not match'
+
+        proc = partial(merge_labels_to_geolabel, dst_folder = folder_dst, n_kg_classes=n_kg_classes)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+            list(tqdm(executor.map(proc, zip(sorted(paths_label_kg),sorted(paths_label_coordinates),sorted(paths_label_time))), total=len(paths_label_coordinates)))
+
+
+
     # merge all metadata created
     metadata = glob.glob(f'{folder_dst}/metadata/**.json')
     metadata_merged = {}
@@ -329,20 +401,25 @@ def process_data(
 
 
 def main():
-    src_folder = 'data_testing' #'/archive/road_segmentation/images'
-    dst_folder = f'data_geography/'
+    folder = '10_points_filtered_22_07'
+    src_folder = f'/phileo_data/mini_foundation/mini_foundation_tifs/{folder}' #'/archive/road_segmentation/images'
+    dst_folder = f'/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/{folder}' #'data_geography'#
     aux_data = '/phileo/aux_data'
-    # koppen_geiger_map = '/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/beck_kg_map_masked.tif'
         
     N_OFFSETS = 0
-    PATCH_SIZE = 64
-    VAL_SPLIT_RATIO = 0.1
+    PATCH_SIZE = 128
+    VAL_SPLIT_RATIO = 0
     
-    # with open(f'{aux_data}/train_test_locations.json', 'r') as f:
-    #     train_test_locations = json.load(f)
+    with open(f'train_test_leonardo.json', 'r') as f:
+        train_test_locations = json.load(f)
+
+    files = glob.glob(f"/phileo_data/mini_foundation/mini_foundation_SAFE/{folder}/**.SAFE")
+    names = [f.split('/')[-1].split('.SAFE')[0] for f in files]
 
 
-    train_locations = ['isreal-2_3']#['denmark-1_1','east-africa_2','isreal-2_3','isreal-2_5','east-africa_3']#train_test_locations['train_locations']
+    # print(names)
+
+    train_locations = names # S2B_MSIL2A_20221030T151649_N0400_R025_T20UPB_20221030T182721','S2B_MSIL2A_20221030T134709_N0400_R024_T21KYA_20221030T160525']#train_test_locations['train_locations']
     test_locations = [] #train_test_locations['test_locations']
 
     process_data(
@@ -354,7 +431,8 @@ def main():
         val_split_ratio=VAL_SPLIT_RATIO,
         test_locations=test_locations,
         train_locations=train_locations,
-        num_workers=1
+        create_geo_label=True,
+        num_workers=2
 )
         
 
