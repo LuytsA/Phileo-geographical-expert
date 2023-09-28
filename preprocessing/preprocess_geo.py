@@ -15,21 +15,47 @@ from functools import partial
 import concurrent.futures
 import config_geography
 
-def kg_patch_to_label(patches,tile):
+def get_coordinate_array(coord_bbox, shape):
+    '''
+    coord_bbox in format [lat_min,lat_max,lng_min,lng_max]
+    shape =(n_pixels in latitude, n_pixels in longitude)
+    '''
+    stepsize_lat=(coord_bbox[1]-coord_bbox[0])/shape[0]
+    stepsize_lng=(coord_bbox[3]-coord_bbox[2])/shape[1]
+    start_lat = coord_bbox[0]+stepsize_lat/2
+    stop_lat = coord_bbox[1]+stepsize_lat/2
+    start_lng = coord_bbox[2]+stepsize_lng/2
+    stop_lng = coord_bbox[3]+stepsize_lng/2
+
+    xy = np.mgrid[start_lat:stop_lat:stepsize_lat,start_lng:stop_lng:stepsize_lng]
+
+    return bo.channel_first_to_last(xy)
+
+def patches_to_label(patches,tile):
+    kg_patches = patches[:,:,:,:1].astype(int)
+    coord_patches = patches[:,:,:,-2:]
+    coord_patches = np.mean(coord_patches,axis=(1,2)) # coordinate label per patch is average over all coords in that patch
+
     # count occurence of each label. Final label array consists of the weighted occurences for each label
-    label =np.zeros((patches.shape[0],len(config_geography.kg_map.keys())))
-    for i in range(patches.shape[0]):
-        u = np.unique(patches[i], return_counts=True,)
-        label[i,u[0]] = u[1]/np.sum(u[1])
+    kg_label =np.zeros((kg_patches.shape[0],len(config_geography.kg_map.keys())))
+    for i in range(kg_patches.shape[0]):
+        u = np.unique(kg_patches[i], return_counts=True,)
+        kg_label[i,u[0]] = u[1]/np.sum(u[1])
 
-    # add region and coordinates info (same for every patch in the tile)
-    with open('/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/tiles_coordinates.json') as fp:
-        tiles_coord = json.load(fp)
-    coord = tiles_coord[tile]
     region = config_geography.regions[tile.split('_')[0]]
-    label = np.concatenate([label,np.repeat(np.array([coord+[region]]),label.shape[0], axis=0)], axis=-1)
+    print(kg_label.shape,coord_patches.shape, np.repeat([region],kg_label.shape[0],axis=0).shape)
+    labels =np.concatenate([kg_label,coord_patches, np.repeat([[region]],kg_label.shape[0],axis=0)], axis=-1)
 
-    return label
+    return labels
+
+    # # add region and coordinates info (same for every patch in the tile)
+    # with open('/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/tiles_coordinates.json') as fp:
+    #     tiles_coord = json.load(fp)
+    # coord = tiles_coord[tile]
+    ## region = config_geography.regions[tile.split('_')[0]]
+    # label = np.concatenate([label,np.repeat(np.array([coord+[region]]),label.shape[0], axis=0)], axis=-1)
+
+    # return label
 
 def clip_kg_map(
         kg:str,
@@ -47,7 +73,7 @@ def clip_kg_map(
     
     bo.delete_dataset_if_in_memory_list([kg_clipped,bbox_vector,bbox_vector_buffered])
 
-    return kg_aligned
+    return kg_aligned, bbox_ltlng
 
 
 def select_and_save_patches(
@@ -133,7 +159,9 @@ def select_and_save_patches(
     selected_labels = np.concatenate(selected_labels)
     selected_s2 = np.concatenate(selected_s2)
 
-    selected_labels = kg_patch_to_label(selected_labels,tile)
+    selected_labels = patches_to_label(selected_labels,tile)
+    # selected_labels =np.concatenate([kg_label,coord_patches, np.repeat([region],kg_label.shape[0],axis=0)], axis=-1)
+
     # if partition=='train':
     #     selected_labels_val = kg_patch_to_label(selected_labels_val,tile)
 
@@ -163,7 +191,7 @@ def select_and_save_patches(
     if partition=='train':
         selected_labels_val = np.concatenate(selected_labels_val)
         selected_s2_val = np.concatenate(selected_s2_val)
-        selected_labels_val = kg_patch_to_label(selected_labels_val,tile)
+        selected_labels_val = patches_to_label(selected_labels_val,tile)
 
         assert selected_labels_val.shape[0] == selected_s2_val.shape[0], "Number of patches do not match."
     
@@ -238,26 +266,34 @@ def process_tile(
     im1 = f'{folder_src}/{tile}_0.tif'
     im2 = f'{folder_src}/{tile}_1.tif'
     im3 = f'{folder_src}/{tile}_2.tif'
-    label = clip_kg_map(koppen_geiger_map,im1)[0]
+    label, bbox_latlng = clip_kg_map(koppen_geiger_map,im1)
+    label=label[0]
 
-    try:
-        assert bo.check_rasters_are_aligned([label,im1,im2,im3]), 'labels and images are not aligned'
+    # try:
+    assert bo.check_rasters_are_aligned([label,im1,im2,im3]), 'labels and images are not aligned'
 
-        label_arr = bo.raster_to_array(label)
-        label_patches = bo.array_to_patches(label_arr, tile_size=patch_size, n_offsets=overlaps)
+    label_arr = bo.raster_to_array(label)
+    coord_arr = get_coordinate_array(bbox_latlng, label_arr.shape)
 
+    label_patches = bo.array_to_patches(label_arr, tile_size=patch_size, n_offsets=overlaps)
+    coord_patches = bo.array_to_patches(coord_arr, tile_size=patch_size, n_offsets=overlaps)
+    # coord_patches = np.mean(coord_patches,axis=(1,2)) # coordinate label per patch is average over all coords in that patch
 
-        # save s2 patches (3 images per label)
-        im_patches = []
-        for i,raster in enumerate([im1,im2,im3]):
-            arr = bo.raster_to_array(raster)
-            im_patches.append(bo.array_to_patches(arr, tile_size=patch_size, n_offsets=overlaps))
+    print(coord_patches.shape,label_patches.shape)
+    label_patches = np.concatenate([label_patches,coord_patches],axis=-1)
+    print(coord_patches.shape,label_patches.shape)
 
-        select_and_save_patches(tile=tile, label_patches=label_patches, s2_patches=im_patches, dst_folder=folder_dst,
-                    partition=partition, val_split_ratio=val_split_ratio)
+    # save s2 patches (3 images per label)
+    im_patches = []
+    for i,raster in enumerate([im1,im2,im3]):
+        arr = bo.raster_to_array(raster)
+        im_patches.append(bo.array_to_patches(arr, tile_size=patch_size, n_offsets=overlaps))
 
-    except Exception as e:
-        print(f'WARNING: tile {tile} failed with error: \n',e)
+    select_and_save_patches(tile=tile, label_patches=label_patches, s2_patches=im_patches, dst_folder=folder_dst,
+                partition=partition, val_split_ratio=val_split_ratio)
+
+    # except Exception as e:
+    #     print(f'WARNING: tile {tile} failed with error: \n',e)
 
 
 def process_data(
@@ -358,7 +394,7 @@ def main():
     # REGIONS =['east-africa', 'europe','eq-guinea', 'japan','south-america', 'north-america', 'nigeria', 'senegal']
     src_folder = '/archive/road_segmentation/images' #'/home/andreas/vscode/GeoSpatial/phi-lab-rd/data/road_segmentation/images'
     dst_folder = f'data_geography/'
-    koppen_geiger_map = '/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/Beck_KG_V1_present_0p0083.tif'
+    koppen_geiger_map = '/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/beck_kg_map_masked.tif'
         
     n_offsets= 0
     tile_size=64
@@ -368,8 +404,8 @@ def main():
         train_test_locations = json.load(f)
 
 
-    train_locations = train_test_locations['train_locations']
-    test_locations = train_test_locations['test_locations']
+    train_locations = train_test_locations['train_locations'][:3]
+    test_locations = [] #train_test_locations['test_locations']
 
     process_data(
         folder_src=src_folder,
@@ -380,7 +416,7 @@ def main():
         val_split_ratio=val_split_ratio,
         test_locations=test_locations,
         train_locations=train_locations,
-        num_workers=6
+        num_workers=3
 )
         
 

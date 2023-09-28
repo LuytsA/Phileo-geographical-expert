@@ -10,40 +10,38 @@ import json
 import config_geography
 
 REGIONS_BUILDINGS = ['DNK', 'EGY', 'GHA', 'ISR', 'TZA', 'UGA']
-REGIONS_ROADS = ['north-america','east-africa', 'europe','eq-guinea', 'japan','south-america', 'nigeria', 'senegal']
-REGIONS = REGIONS_ROADS + REGIONS_BUILDINGS
+REGIONS_DOWNSTREAM_DATA = ['denmark-1', 'denmark-2', 'east-africa', 'egypt-1', 'eq-guinea', 'europe', 'ghana-1', 'isreal-1', 'isreal-2', 'japan', 'nigeria','north-america', 'senegal', 'south-america', 'tanzania-1','tanzania-2', 'tanzania-3', 'tanzania-4', 'tanzania-5', 'uganda-1']
 
-region_map = config_geography.regions
+REGIONS = REGIONS_DOWNSTREAM_DATA + REGIONS_BUILDINGS
 
+
+def sanity_check_labels_exist(x_files,y_files, y):
+        existing_x = [] 
+        existing_y = []
+        counter_missing = 0
+
+        assert len(x_files)==len(y_files)
+        for x_path,y_path in zip(x_files,y_files):
+            
+            exists = os.path.exists(y_path)
+            if exists:
+                existing_x.append(x_path)
+                existing_y.append(y_path)
+            else:
+                counter_missing+=1
+
+        if counter_missing>0:
+            print(f'WARNING: {counter_missing} label(s) not found')
+            missing = [y_f for y_f in y_files if y_f not in existing_y]
+            print(f'Showing up to 5 missing files: {missing[:5]}')
+
+        return existing_x, existing_y
 
 def protocol_all(folder: str, y: str= 'y'):
     """
     Loads all the data from the data folder.
     """
 
-    # if y == 'geography':
-    #     x_train_files = sorted(glob(os.path.join(folder, f"*train_s2.npy")))
-    #     x_val_files = sorted(glob(os.path.join(folder, f"*val_s2.npy")))
-    #     x_test_files = sorted(glob(os.path.join(folder, f"*test_s2.npy")))
-
-    #     x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
-    #     x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
-    #     x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
-
-    #     y_part = []
-    #     with open('/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/tiles_coordinates.json') as fp:
-    #         tiles_coord = json.load(fp)
-    #     for part in ['train','test','val']:
-    #         ff = sorted(glob(os.path.join(folder, f"*{part}_s2.npy")))
-    #         tile_names = [f.split('/')[-1].split(f'_{part}_')[0] for f in ff]
-    #         tile_shapes = [np.load(f, mmap_mode='r').shape[0] for f in ff]
-    #         regions = [region_map[f.split('_')[0]] for f in tile_names]
-    #         assert len(tile_names)==len(tile_shapes)
-    #         y_part.append(beo.MultiArray([ np.repeat(np.array([tiles_coord[n]+[r]]),s, axis=0) for n,s,r in zip(tile_names,tile_shapes,regions)]))
-        
-    #     y_train, y_test, y_val = y_part
-
-# else:
     x_train_files = sorted(glob(os.path.join(folder, f"*train_s2.npy")))
     y_train_files = sorted(glob(os.path.join(folder, f"*train_label_{y}.npy")))
 
@@ -52,6 +50,10 @@ def protocol_all(folder: str, y: str= 'y'):
 
     x_test_files = sorted(glob(os.path.join(folder, f"*test_s2.npy")))
     y_test_files = sorted(glob(os.path.join(folder, f"*test_label_{y}.npy")))
+
+    x_train_files,y_train_files =  sanity_check_labels_exist(x_train_files,y_train_files, y)
+    x_val_files,y_val_files =  sanity_check_labels_exist(x_val_files,y_val_files, y)
+    x_test_files,y_test_files =  sanity_check_labels_exist(x_test_files,y_test_files, y)
 
     x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
     y_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_train_files])
@@ -110,28 +112,11 @@ def protocol_split(folder: str, split_percentage: float = 0.2, regions: list = N
     y_train_files = [f_name.replace('s2', f'label_{y}') for f_name in x_train_files]
     x_val_files = [f_name.replace('train', 'val') for f_name in x_train_files]
     y_val_files = [f_name.replace('train', 'val') for f_name in y_train_files]
+    
+    x_train_files,y_train_files =  sanity_check_labels_exist(x_train_files,y_train_files, y)
+    x_val_files,y_val_files =  sanity_check_labels_exist(x_val_files,y_val_files, y)
+    x_test_files,y_test_files =  sanity_check_labels_exist(x_test_files,y_test_files, y)
 
-
-
-    # if y == 'geography':
-
-    #     x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
-    #     x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
-    #     x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
-
-    #     y_part = []
-    #     with open('/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/tiles_coordinates.json') as fp:
-    #         tiles_coord = json.load(fp)
-    #     for part, ff in zip(['train','test','val'],[x_train_files,x_test_files,x_val_files]):
-    #         tile_names = [f.split('/')[-1].split(f'_{part}_')[0] for f in ff]
-    #         tile_shapes = [np.load(f, mmap_mode='r').shape[0] for f in ff]
-    #         regions = [region_map[f.split('_')[0]] for f in tile_names]
-    #         assert len(tile_names)==len(tile_shapes)
-    #         y_part.append(beo.MultiArray([ np.repeat(np.array([tiles_coord[n]+[r]]),s, axis=0) for n,s,r in zip(tile_names,tile_shapes,regions)]))
-        
-    #     y_train, y_test, y_val = y_part
-
-    # else:
     x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
     y_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_train_files])
 
@@ -177,25 +162,10 @@ def protocol_regions(folder: str, regions: list = None, y: str = 'y'):
         y_test_files = y_test_files + sorted(glob(os.path.join(folder, f"{region}*test_label_{y}.npy")))
 
 
-    # if y == 'geography':
+    x_train_files,y_train_files =  sanity_check_labels_exist(x_train_files,y_train_files, y)
+    x_val_files,y_val_files =  sanity_check_labels_exist(x_val_files,y_val_files, y)
+    x_test_files,y_test_files =  sanity_check_labels_exist(x_test_files,y_test_files, y)
 
-    #     x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
-    #     x_val = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_val_files])
-    #     x_test = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_test_files])
-
-    #     y_part = []
-    #     with open('/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/tiles_coordinates.json') as fp:
-    #         tiles_coord = json.load(fp)
-    #     for part, ff in zip(['train','test','val'],[x_train_files,x_test_files,x_val_files]):
-    #         tile_names = [f.split('/')[-1].split(f'_{part}_')[0] for f in ff]
-    #         tile_shapes = [np.load(f, mmap_mode='r').shape[0] for f in ff]
-    #         regions = [region_map[f.split('_')[0]] for f in tile_names]
-    #         assert len(tile_names)==len(tile_shapes)
-    #         y_part.append(beo.MultiArray([ np.repeat(np.array([tiles_coord[n]+[r]]),s, axis=0) for n,s,r in zip(tile_names,tile_shapes,regions)]))
-        
-    #     y_train, y_test, y_val = y_part
-    
-# else:
     x_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in x_train_files])
     y_train = beo.MultiArray([np.load(f, mmap_mode='r') for f in y_train_files])
 

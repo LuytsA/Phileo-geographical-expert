@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import sys; sys.path.append("./")
 
 import matplotlib.pyplot as plt
 import buteo as beo
@@ -30,16 +31,131 @@ class TiledMSE(nn.Module):
         weighted = (sum_mse * (1 - self.bias)) + (mse * self.bias)
         
         return weighted 
+
+class MvMFLoss(nn.Module):
+    ''' credits to https://www.ecmlpkdd2019.org/downloads/paper/63.pdf '''
     
+    def __init__(self, n_center, direction_inits, density_inits, directions_learnable=False, safe_exp_shift=-3):
+        super(MvMFLoss, self).__init__()
+        
+        self.safe_exp_shift = safe_exp_shift
+        self.n_center = n_center
+        self.directions = torch.FloatTensor(direction_inits).cuda()
+        self.densities =  torch.nn.Parameter(torch.FloatTensor(np.array([density_inits])).cuda())
+        if directions_learnable:
+            self.directions = torch.nn.parameter(self.directions)
+
+
+    def dist_encoded(self, coord_true, directions, radius=1):
+
+        # print(coord_true.shape, directions.shape)
+        lat1_enc,long1_sin, long1_cos = coord_true[:,0], (2*coord_true[:,1]-1), (2*coord_true[:,2]-1)
+        lat2_enc,long2_sin, long2_cos = directions[:,0],(2*directions[:,1]-1), (2*directions[:,2]-1)
+
+        lat1_r = lat1_enc*np.pi
+        lat2_r = lat2_enc*np.pi
+
+        #cos_dif = torch.zeros((len(long1_cos),len(long2_cos)))
+        cos_dif = torch.outer(long1_cos,long2_cos) + torch.outer(long1_sin,long2_sin)
+        
+        return radius*radius*(torch.outer(torch.sin(lat1_r),torch.sin(lat2_r))*cos_dif +torch.outer(torch.cos(lat1_r),torch.cos(lat2_r)))
+
+    # def MvMF(coordinate,weights,r, density,mu):
+    #     weights = weights/np.sum(weights)
+
+    #     #return density/np.sinh(density)*np.exp(density*dist_encoded(coordinate, ref=mu,r=r))
+    #     return np.average(density/np.sinh(density)*np.exp(density*dist_encoded(coordinate, ref=mu,r=r)),weights=weights, axis=0)
+
+
+    def forward(self, y_pred, y_true):
+
+        weights = y_pred
+        encoded_coordinate = y_true[:,pos_feature_label['coords']]
+
+        # # naive implementation
+        # dens = torch.exp(self.densities)
+        # normalisation = dens/torch.sinh(dens)
+        # dist = self.dist_encoded(coord_true=encoded_coordinate, directions=self.directions)
+        # exp_factor = torch.exp(torch.mul(dens, dist))
+        # weighted_sum = torch.sum(weights * torch.mul(normalisation, exp_factor), dim=-1)
+        # loss_naive = -torch.log(weighted_sum)
+
+        # weighted_sum2 = torch.sum(weights * (2*torch.exp(self.densities + dens*(dist-1))), dim=-1)
+        # loss_naive2 = -torch.log(weighted_sum2)
+
+        # safer version 
+        dist = self.dist_encoded(coord_true=encoded_coordinate, directions=self.directions)
+        gamma = torch.log(2*weights) + self.densities + torch.mul(torch.exp(self.densities), dist-1)
+        #print(gamma.shape)
+        gamma_max = torch.max(gamma, dim=-1, keepdim=True)[0]
+        #print(gamma_max.shape)
+        deltas = gamma - gamma_max
+        loss = -(gamma_max + torch.log(torch.sum(torch.exp(deltas),dim=-1)))
+
+        # print(gamma)
+        # print()
+        # print(gamma_max)
+
+
+
+        # log_likelihood_component = 0.69314718056 + self.densities + torch.mul(torch.exp(self.densities), dist-1)
+        # top_components = torch.topk(log_likelihood_component, k=600, dim=-1)[1]
+        # print(log_likelihood_component.shape)
+        # print(top_components.shape)
+
+        # print(self.densities.shape)
+
+        # densities_best = self.densities.take_along_dim(top_components, dim=-1)
+        # weights_best = weights.take_along_dim(top_components, dim=-1)
+        # dist_best = dist.take_along_dim(top_components, dim=-1)
+        # print(dist_best.shape, weights_best.shape,  densities_best.shape)
+
+
+        # safe_exp_shift = torch.mean(torch.exp(densities_best) * (dist_best-1)) + torch.mean(densities_best)
+        # print(safe_exp_shift)
+        # #print(dist_best)
+        # print(densities_best)
+
+        # exp = densities_best+ torch.exp(densities_best) * (dist_best-1) - safe_exp_shift
+        # exp_factors_shifted = torch.exp(exp)
+        # # torch.mul(torch.exp(self.densities), dist-1) - self.safe_exp_shift
+        # # elements = torch.exp(self.densities) * torch.exp(exp_factors_shifted)
+        # print(exp)
+        # # print(exp_factors_shifted)
+        # loss =   -0.69314718056 - safe_exp_shift - torch.log(torch.sum(weights_best * exp_factors_shifted , dim=-1))
+
+
+        # log_likelihood_component = torch.log(2*torch.exp(self.densities)) + torch.mul(torch.exp(self.densities), dist-1)
+        # log_likelihood_component = 0.69314718056 + self.densities + torch.mul(torch.exp(self.densities), dist-1)
+        
+        # print(torch.mul(torch.exp(self.densities), dist-1).shape)
+        # print(self.densities.shape)
+        # print(weights.shape)
+        # print(log_likelihood_component.shape)
+
+        # loss = torch.sum(torch.multiply(-log_likelihood_component, weights), axis=-1)
+        # print(weighted_likelihood.shape)
+        # print(loss.shape)
+        loss = torch.mean(loss)
+
+        return loss, loss, loss, loss, False
+
+# CENTERS = np.load('centers_all_more_enc.npy')
+# criterion = MvMFLoss(n_center=len(CENTERS), direction_inits=CENTERS, density_inits=[20 for i in range(len(CENTERS))], safe_exp_shift=-23000) #GeographicalLoss(n_classes=len(config_geography.regions.keys()))#nn.MSELoss() #nn.CrossEntropyLoss() # vit_mse_losses(n_patches=4)
+# y_pred = torch.rand((4,len(CENTERS))).cuda()
+# y_true = torch.rand((4,35)).cuda()
+# print(criterion(y_pred=y_pred, y_true=y_true))
+
 class GeographicalLoss(nn.Module):
     """
     Combination of coordinate prediction (regression) and region/climate prediction (classification)
     """
-    def __init__(self, n_classes):
+    def __init__(self, n_classes, coord_loss=nn.MSELoss()):
         super(GeographicalLoss, self).__init__()
         self.crossentropy_loss = nn.CrossEntropyLoss()
+        self.coord_loss = coord_loss
         self.mse_loss = nn.MSELoss()
-        self.weights = np.array([1,1,1])
+        self.weights = np.array([10,1,1])
         self.weights = self.weights/self.weights.sum()
         self.climate_classes = {}
 
@@ -67,17 +183,30 @@ class GeographicalLoss(nn.Module):
 
     def forward(self, y_pred, y_true):
 
-        region_pred_logits,region_true = y_pred[:,pos_feature_pred['region']], y_true[:,pos_feature_label['post_aug']['region']].type(torch.LongTensor).cuda()
-        coord_pred, coord_true = y_pred[:,pos_feature_pred['coords']], y_true[:,pos_feature_label['post_aug']['coords']]
-        kg_pred_logits,kg_true = y_pred[:,pos_feature_pred['kg']], y_true[:,pos_feature_label['post_aug']['kg']]
+        coord_pred, coord_true = y_pred[:,pos_feature_pred['coords']], y_true[:,pos_feature_label['coords']]
+        kg_pred_logits,kg_true = y_pred[:,pos_feature_pred['kg']], y_true[:,pos_feature_label['kg']]
+        time_pred, time_true = y_pred[:,pos_feature_pred['time']], y_true[:,pos_feature_label['time']]
 
-        
-        region_loss = self.crossentropy_loss(region_pred_logits,region_true.squeeze())
-        coordinate_loss = self.mse_loss(coord_pred,coord_true)
+        non_sea_patches = torch.where(kg_true[:,0]<0.9)
+        only_sea =(len(non_sea_patches[0])<1)
+        # if len(non_sea_patches[0])<1:
+        #     print(len(non_sea_patches[0]))
+        #     print('only sea patches')
+        #     kg_loss = self.kg_loss(kg_pred_logits,kg_true)
+        #     return self.weights[1]*kg_loss, kg_loss, kg_loss, kg_loss
+        # sea_patches = torch.where(kg_true[:,0]>0.8)
+        # if len(kg_true[sea_patches])>0:
+        #     r = np.random.rand()
+        #     np.save(f"sea_{r}",kg_true[sea_patches].detach().cpu().numpy())
+        #     np.save(f"c_{r}",coord_true[sea_patches].detach().cpu().numpy())
+
+
+        coordinate_loss = self.coord_loss(coord_pred[non_sea_patches],coord_true[non_sea_patches])
         kg_loss = self.kg_loss(kg_pred_logits,kg_true)
+        time_loss = self.mse_loss(time_pred[non_sea_patches], time_true[non_sea_patches])
 
         
-        return self.weights[0]*coordinate_loss + self.weights[1]*region_loss+ self.weights[2]*kg_loss, region_loss,coordinate_loss, kg_loss
+        return self.weights[0]*coordinate_loss + self.weights[1]*kg_loss + self.weights[2]*time_loss, coordinate_loss, kg_loss, time_loss, only_sea
     
            
 class LayerNorm(nn.Module):
@@ -252,6 +381,26 @@ class SE_BlockV3(nn.Module):
         return x
 
 
+class MvFM_layer(nn.Module):
+    ''' credits to https://www.ecmlpkdd2019.org/downloads/paper/63.pdf '''
+    
+    def __init__(self, n_center, feature_dim):
+        super(MvFM_layer, self).__init__()
+        
+        self.n_center = n_center
+        self.feature_dim = feature_dim
+        self.linear = nn.Linear(in_features=self.feature_dim, out_features=n_center, bias=False)
+        self.softmax = nn.Softmax(dim=0)
+        self.directions = None
+        self.kappas = None
+
+    def forward(self,x):
+        x = self.linear(x)
+        x = self.softmax(x)
+
+        return x 
+
+
 def get_activation(activation_name):
     if activation_name == "relu":
         return nn.ReLU6(inplace=True)
@@ -379,15 +528,23 @@ def render_s2_as_rgb(arr, channel_first=False):
 
     return rgb_slice
 
+def decode_time(encoded_time):
+    doy_sin,doy_cos = encoded_time
+    doy = np.arctan2((2*doy_sin-1),(2*doy_cos-1))*365/(2*np.pi)
+    if doy<1:
+        doy+=365
+    return np.array([np.round(doy)])
+
+
 def decode_coordinates(encoded_coords):
     lat_enc,long_sin,long_cos = encoded_coords
-    lat = lat_enc*180-90
+    lat = -lat_enc*180+90
     long = np.arctan2((2*long_sin-1),(2*long_cos-1))*360/(2*np.pi)
     return np.array([lat,long])
 
 def encode_coordinates(coords):
     lat,long = coords
-    lat = (lat + 90)/180
+    lat = (-lat + 90)/180
     long_sin = (np.sin(long*2*np.pi/360)+1)/2
     long_cos = (np.cos(long*2*np.pi/360)+1)/2
 
@@ -396,7 +553,7 @@ def encode_coordinates(coords):
 import config_geography
 regions = config_geography.regions
 regions_inv = config_geography.region_inv
-def visualise(x, y, y_pred=None, images=5, channel_first=False, vmin=0, vmax=1, save_path=None):
+def visualise(x, y, y_pred=None, images=5, channel_first=False, vmin=0, vmax=1, save_path=None, centers=None):
     rows = images
     if y_pred is None:
         columns = 1
@@ -412,26 +569,26 @@ def visualise(x, y, y_pred=None, images=5, channel_first=False, vmin=0, vmax=1, 
         i = i + 1
         fig.add_subplot(rows, columns, i)
 
-        region_pred_logits,region = y_pred[idx,pos_feature_pred['region']], y[idx,pos_feature_label['post_aug']['region']]
-        coord_pred, coord_true = y_pred[idx,pos_feature_pred['coords']], y[idx,pos_feature_label['post_aug']['coords']]
-        kg_pred_logits,kg_true = y_pred[idx,pos_feature_pred['kg']], y[idx,pos_feature_label['post_aug']['kg']]
-        
-        
-        # region_pred_logits,region = y_pred[idx,-8:], y[idx,34]
-        # coord_pred, coord_true = y_pred[idx,-11:-8], y[idx,-11:-8]
-        # kg_pred_logits,kg_true = y_pred[idx,:31], y[idx,:31]
+        # coord_pred, coord_true = y_pred[idx,pos_feature_pred['coords']], y[idx,pos_feature_label['coords']]
+        # kg_pred_logits,kg_true = y_pred[idx,pos_feature_pred['kg']], y[idx,pos_feature_label['kg']]
+        # time_pred,time_true = y_pred[idx,pos_feature_pred['time']], y[idx,pos_feature_label['time']]
+        coord_true = y[idx,pos_feature_label['coords']]
 
+        # print(y_pred[idx])
+        # print(y_pred[idx].shape)
 
-        lat_pred,long_pred = decode_coordinates(coord_pred)
+        nearest_center = centers[np.argmax(y_pred[idx])]
+
+        lat_pred,long_pred = decode_coordinates(nearest_center)#coord_pred)
         lat,long = decode_coordinates(coord_true)
-        region_pred = np.argmax(region_pred_logits)
-        climate_pred = config_geography.kg_map[int(np.argmax([kg_pred_logits]))]['climate_class_str']
-        climate = config_geography.kg_map[int(np.argmax([kg_true]))]['climate_class_str']
-        s1 = f"pred  : lat-long = {np.round(lat_pred,1),np.round(long_pred,1)} \n region - {regions_inv[int(region_pred)]} \n climate - {climate_pred}"
-        s2 = f"target: lat-long = {np.round(lat,1),np.round(long,1)} \n region - {regions_inv[int(region)]} \n climate - {climate}"
+        doy_pred, doy = 0,0#decode_time(time_pred), decode_time(time_true)
+        climate_pred = 0 #config_geography.kg_map[int(np.argmax([kg_pred_logits]))]['climate_class_str']
+        climate = 0 #config_geography.kg_map[int(np.argmax([kg_true]))]['climate_class_str']
+        s1 = f"pred  : lat-long = {np.round(lat_pred,1),np.round(long_pred,1)} \n climate - {climate_pred} \n DoY - {doy_pred}"
+        s2 = f"target: lat-long = {np.round(lat,1),np.round(long,1)} \n climate - {climate} \n DoY - {doy}"
 
         plt.text(25, 25, s1,fontsize=18, bbox=dict(fill=True))
-        plt.text(25, 35, s2,fontsize=18, bbox=dict(fill=True))
+        plt.text(25, 45, s2,fontsize=18, bbox=dict(fill=True))
         plt.imshow(rgb_image)
         plt.axis('on')
         plt.grid()

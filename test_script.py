@@ -24,6 +24,7 @@ import cv2
 import config_geography
 import cartopy.crs as crs
 import cartopy.feature as cfeature
+from datetime import datetime 
 
 from utils import (
     load_data,
@@ -31,6 +32,7 @@ from utils import (
     visualise,
     render_s2_as_rgb,
     decode_coordinates,
+    decode_time
 )
 from preprocessing.preprocess_geo import clip_kg_map
 import config_geography
@@ -47,14 +49,26 @@ def precision_recall(y_pred_classification,y_test_classification):
 
     return np.array([tp, fp, fn])
 
+def show_tiled(rgb_array, tile_size, line_thickness=10):
+    h,w =rgb_array.shape[0], rgb_array.shape[1]
+    h_lines = h//tile_size + 1
+    w_lines = w//tile_size + 1
 
+    for l in range(h_lines):
+        black = [tile_size*l +i for i in range(int(line_thickness)) ]
+        rgb_array[black,:,:] = [0,0,0]
+    for l in range(w_lines):
+        black = [tile_size*l +i for i in range(int(line_thickness)) ]
+        rgb_array[:,black,:] = [0,0,0]
+    
+    return rgb_array
 
 def patches_to_array(patches, reference, tile_size=64):
     h,w,c = reference.shape
     n_patches = patches.shape[0]
     # Reshape the patches for stitching
     print('patches',patches.shape,'arr',reference.shape)
-    reshape = patches[:-79].reshape(
+    reshape = patches[:-171].reshape(
         int(np.sqrt(n_patches))-1,
         int(np.sqrt(n_patches))-1,
         tile_size,
@@ -75,7 +89,7 @@ def patches_to_array(patches, reference, tile_size=64):
 
     return destination
 
-def visualise_prediction_tile(tiles, model, data_folder = '/home/andreas/vscode/GeoSpatial/phi-lab-rd/data/road_segmentation/images', label='lc'):
+def visualise_prediction_tile(tiles, model,results_dir, data_folder = '/home/andreas/vscode/GeoSpatial/phi-lab-rd/data/road_segmentation/images', label='lc', tile_size=128):
     
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -85,92 +99,120 @@ def visualise_prediction_tile(tiles, model, data_folder = '/home/andreas/vscode/
 
     for p in tiles:
         print(p)
-        try:
-            kg = clip_kg_map('Beck_KG_V1_present_0p0083.tif',f'{data_folder}/{p}_0.tif')[0]
-            kg_arr = beo.raster_to_array(kg).astype(np.float32)
-            s2_arr = beo.raster_to_array(f'{data_folder}/{p}_0.tif')[:,:,[1,2,3,4,5,6,7,8,9,10]].astype(np.float32)
-            region = p
-            coord_bbox = beo.raster_to_metadata(f'{data_folder}/{p}_0.tif')['bbox_latlng']
+        #try:
+        kg = clip_kg_map('/phileo_data/aux_data/beck_kg_map_masked.tif',f'{data_folder}/{p}_s2.tif')[0]
+        kg_arr = beo.raster_to_array(kg).astype(np.float32)
+        s2_arr = beo.raster_to_array(f'{data_folder}/{p}_s2.tif')[:,:,[0,1,2,3,4,5,6,7,8,9,10]].astype(np.float32)
+        #s2_SCL = s2_arr[:,:,0]
+        #s2_arr = s2_arr[:,:,1:]
+        region = p
+        coord_bbox = beo.raster_to_metadata(f'{data_folder}/{p}_s2.tif')['bbox_latlng']
 
-            patches = beo.array_to_patches(s2_arr,tile_size=64,n_offsets=0)
-            patches_kg = beo.array_to_patches(kg_arr,tile_size=64,n_offsets=0)
-
-            np.divide(patches, 10000.0, out=patches)
-            patches = beo.channel_last_to_first(patches)
-
-            # x_tile = beo.MultiArray([patches])
-            # y_dummy = beo.MultiArray([np.zeros(patches.shape[0])])
-            # dl,_,_ = load_data(x_tile, y_dummy,[0],[0],[0],[0],with_augmentations=False,batch_size=16, encoder_only=True)
-            dl = DataLoader(patches, batch_size=16, shuffle=False, num_workers=0, drop_last=False, generator=torch.Generator(device='cuda'))
-
-
-            coords_preds = []
-            region_preds = []
-            kg_preds = []
-            with torch.no_grad():
-                for inputs in tqdm(dl):
-                    batch_pred = model(inputs.to(device))
-
-                    y_p = batch_pred.detach().cpu().numpy()
-
-                    region_pred = y_p[:,pos_feature_pred['region']].argmax(axis=1)
-                    coord_pred = y_p[:,pos_feature_pred['coords']]
-                    kg_pred = y_p[:,pos_feature_pred['kg']].argmax(axis=1)
-                
-                    coord_pred = np.array([decode_coordinates(co) for co in coord_pred])
-
-                    coords_preds.append(coord_pred)
-                    region_preds.append(region_pred)
-                    kg_preds.append(kg_pred)
-            region_preds, coords_preds, kg_preds = np.array(region_preds),np.concatenate(coords_preds), np.concatenate(kg_preds)
-            
-            rows,columns =3,2
-            fig = plt.figure(figsize=(8 * columns, 8 * rows))
-
-            fig.add_subplot(rows, columns, 1)
-            rgb_image = render_s2_as_rgb(s2_arr, channel_first=False)
-            plt.imshow(rgb_image)
-            plt.title(f'{region}')
-
-            fig.add_subplot(rows, columns, 2)
-            plt.hist([config_geography.region_inv[int(pred)] for pred in region_preds.flatten()])
-            plt.title(f'Predicted region on patches')
-            # plt.savefig(f'region_dist_{p}.png')
-            # plt.close()
-
-
-            ax = fig.add_subplot(rows, columns, (3,4), projection=crs.Robinson())
-            #ax = fig.add_subplot(1,1,1, projection=crs.Robinson())
-            ax.set_global()
-            ax.add_feature(cfeature.COASTLINE)
-            ax.add_feature(cfeature.BORDERS)
-            ax.gridlines()
-            plt.scatter(x=coords_preds[:,1], y=coords_preds[:,0],
-                        color="dodgerblue",
-                        s=1,
-                        alpha=0.5,
-                        transform=crs.PlateCarree()) ## Important
-
-            plt.scatter(x=coord_bbox[2:], y=coord_bbox[:2],
-                        color="red",
-                        s=16,
-                        transform=crs.PlateCarree()) ## Important
-            plt.title('coordinate predictions on patches')
-
-            fig.add_subplot(rows, columns, 5)
-            cmap = matplotlib.colors.ListedColormap( [np.array(v)/255 for v in kg_colour_map.values()], N=31)
-            plt.imshow(kg_arr,cmap=cmap, interpolation='nearest',vmin=0,vmax=30)
-
-            fig.add_subplot(rows, columns, 6)
-            kg_pred_reshaped = patches_to_array(kg_preds, reference=kg_arr, tile_size=1)
-            plt.imshow(kg_pred_reshaped,cmap=cmap, interpolation='nearest',vmin=0,vmax=30)
-
-            fig.tight_layout()
-            plt.savefig(f'tile_pred_{p}.png')
-            plt.close('all')
+        patches = beo.array_to_patches(s2_arr,tile_size=tile_size,n_offsets=0)
+        total_patches = len(patches)
         
-        except Exception as e:
-            print(e)
+        s2_nodata =np.isin(patches[:,:,:,0],[0,1]) # band 0 contains the SCL classes, [0,1] are defective or no-data pixels
+        im_poi = np.where(np.mean(s2_nodata, axis=(1,2))<0.5)[0]
+        # patches_kg = beo.array_to_patches(kg_arr,tile_size=64,n_offsets=0)
+        patches = patches[im_poi][:,:,:,1:]
+
+        np.divide(patches, 10000.0, out=patches)
+        patches = beo.channel_last_to_first(patches)
+
+        (mission_id, prod_level, datatake_time,proc_base_number, relative_orbit, tile_number, prod_discriminator) = p.split('/')[-1].split('_')
+        datetime_tile = datetime.strptime(datatake_time, "%Y%m%dT%H%M%S")
+        first_day = datetime(datetime_tile.year,month=1,day=1)
+        day_of_year = (datetime_tile-first_day).days
+
+
+        # x_tile = beo.MultiArray([patches])
+        # y_dummy = beo.MultiArray([np.zeros(patches.shape[0])])
+        # dl,_,_ = load_data(x_tile, y_dummy,[0],[0],[0],[0],with_augmentations=False,batch_size=16, encoder_only=True)
+        dl = DataLoader(patches, batch_size=16, shuffle=False, num_workers=0, drop_last=False, generator=torch.Generator(device=device))
+
+
+        coords_preds = []
+        date_preds = []
+        kg_preds = []
+        with torch.no_grad():
+            for inputs in tqdm(dl):
+                batch_pred = model(inputs.to(device))
+
+                y_p = batch_pred.detach().cpu().numpy()
+
+                date_pred = y_p[:,pos_feature_pred['time']]
+                coord_pred = y_p[:,pos_feature_pred['coords']]
+                kg_pred = y_p[:,pos_feature_pred['kg']].argmax(axis=1)
+            
+                coord_pred = np.array([decode_coordinates(co) for co in coord_pred])
+                date_pred = np.array([decode_time(day) for day in date_pred])
+
+                coords_preds.append(coord_pred)
+                date_preds.append(date_pred)
+                kg_preds.append(kg_pred)
+        date_preds, coords_preds, kg_preds = np.concatenate(date_preds),np.concatenate(coords_preds), np.concatenate(kg_preds)
+
+        
+        rows,columns =3,2
+        fig = plt.figure(figsize=(8 * columns, 8 * rows))
+
+        fig.add_subplot(rows, columns, 1)
+        rgb_image = render_s2_as_rgb(s2_arr[:,:,1:], channel_first=False)
+        plt.imshow(show_tiled(rgb_image, tile_size))
+        plt.title(f'{region}')
+
+        fig.add_subplot(rows, columns, 2)
+        plt.hist([int(pred) for pred in date_preds.flatten()])
+        plt.title(f'Predicted day of year on patches DoY={day_of_year}')
+        # plt.savefig(f'region_dist_{p}.png')
+        # plt.close()
+
+        print(coord_bbox)
+        print(coords_preds[:5,1])
+        print(coords_preds[:5,0])
+
+        ax = fig.add_subplot(rows, columns, (3,4), projection=crs.Robinson())
+        #ax = fig.add_subplot(1,1,1, projection=crs.Robinson())
+        ax.set_global()
+        ax.add_feature(cfeature.COASTLINE)
+        ax.add_feature(cfeature.BORDERS)
+        ax.gridlines()
+        plt.scatter(x=coords_preds[:,1], y= coords_preds[:,0],  #x=long, y=lat
+                    color="green",
+                    s=1,
+                    alpha=0.5,
+                    transform=crs.PlateCarree()) ## Important
+        
+        sea_patches = np.where(kg_preds==0)
+        plt.scatter(x=coords_preds[[sea_patches],1], y= coords_preds[[sea_patches],0],  #x=long, y=lat
+                    color="dodgerblue",
+                    s=1,
+                    alpha=0.5,
+                    transform=crs.PlateCarree()) ## Important
+        
+        plt.scatter(x=coord_bbox[2:], y= coord_bbox[:2], #x=long, y=lat
+                    color="red",
+                    s=16,
+                    transform=crs.PlateCarree()) ## Important
+        plt.title('coordinate predictions on patches')
+
+        fig.add_subplot(rows, columns, 5)
+        cmap = matplotlib.colors.ListedColormap([np.array([1.0,1.0,1.0])] + [np.array(v)/255 for v in kg_colour_map.values()], N=32)
+        plt.imshow(kg_arr,cmap=cmap, interpolation='nearest',vmin=0,vmax=31)
+
+        fig.add_subplot(rows, columns, 6)
+        print(kg_preds.shape)
+        kg_preds_reconstructed = -np.ones(shape=(total_patches,))
+        kg_preds_reconstructed[im_poi] = kg_preds
+        kg_pred_reshaped = patches_to_array(kg_preds_reconstructed, reference=kg_arr, tile_size=1)
+        plt.imshow(kg_pred_reshaped,cmap=cmap, interpolation='nearest',vmin=0,vmax=30)
+
+        fig.tight_layout()
+        plt.savefig(f'{results_dir}/tile_pred_{tile_number}_{day_of_year}.png')
+        plt.close('all')
+        
+        #except Exception as e:
+        #    print(e)
         
 
 
@@ -319,9 +361,9 @@ if __name__ == "__main__":
     DATA_FOLDER = '/home/andreas/vscode/GeoSpatial/Phileo-geographical-expert/data_geography' #'/home/andreas/vscode/GeoSpatial/Phileo-downstream-tasks/data_landcover'
     REGIONS = ['north-america','east-africa', 'europe','eq-guinea', 'japan','south-america', 'nigeria', 'senegal']
 
-    model_dir = 'trained_models/04092023_CoreEncoder_allregions_split1'
+    model_dir = 'trained_models/23092023_CoreEncoder_allregions_LEO_update_loss_augm'
     model_name = 'CoreEncoder'
-    model = Core_tiny(input_dim=10, output_dim=31+3+8,)
+    model = Core_tiny(input_dim=10, output_dim=31+3+2,)
     # model = torch.compile(model)
 
     # load model
@@ -330,30 +372,32 @@ if __name__ == "__main__":
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     torch.set_default_device(device)
 
+    tiles =   ['/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_07/S2A_MSIL2A_20220727T134711_N0400_R024_T21KXA_20220727T213102_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_04/S2A_MSIL2A_20220414T170851_N0400_R112_T14RPU_20220414T231856_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_04/S2B_MSIL2A_20220413T221939_N0400_R029_T60KYG_20220414T002214_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_10/S2B_MSIL2A_20221020T183409_N0400_R027_T11TPL_20221020T222333_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_04/S2B_MSIL2A_20220429T023239_N0400_R103_T50JLN_20220429T060411_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_01/S2A_MSIL2A_20220122T095321_N0301_R079_T31NGG_20220122T142116_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_01/S2A_MSIL2A_20220129T080201_N0400_R035_T35JLK_20220129T105531_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_01/S2A_MSIL2A_20220110T023101_N0301_R046_T50NMM_20220110T044330_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_10/S2B_MSIL2A_20221002T090709_N0400_R050_T33MTM_20221002T121014_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_07/S2A_MSIL2A_20220706T085611_N0400_R007_T36UVB_20220706T133417_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_01/S2A_MSIL2A_20220128T083221_N0400_R021_T36RUQ_20220128T105623_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_10/S2A_MSIL2A_20221029T181501_N0400_R084_T12RTS_20221029T232858_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_07/S2B_MSIL2A_20220713T093549_N0400_R036_T35VNE_20220713T112940_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_10/S2B_MSIL2A_20221029T090019_N0400_R007_T35TPE_20221029T103554_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_04/S2A_MSIL2A_20220428T164851_N0400_R026_T14QND_20220428T215112_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_07/S2B_MSIL2A_20220729T081609_N0400_R121_T36RXV_20220729T100550_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_07/S2A_MSIL2A_20220729T090601_N0400_R050_T33MTM_20220729T154758_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_07/S2B_MSIL2A_20220704T022539_N0400_R046_T52UDV_20220704T045115_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_10/S2B_MSIL2A_20221030T083009_N0400_R021_T36RUQ_20221030T101025_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_07/S2A_MSIL2A_20220728T013721_N0400_R031_T52KCV_20220728T063155_train_s2.npy', '/phileo_data/mini_foundation/mini_foundation_patches_np/patches_labeled/10_points_filtered_22_10/S2A_MSIL2A_20221025T134711_N0400_R024_T21KXA_20221025T191904_train_s2.npy']
+    #tiles = glob('data_testing/**.tif')
+    tiles =[f.split('.npy')[0].split('patches_labeled/')[-1].split('_train_s2')[0] for f in tiles][8:] #['east-africa_10', 'japan_10', 'nigeria_10']
 
-    # tiles = glob('data_testing/**.tif')
-    # tiles =[f.split('.tif')[0].split('/')[-1].split('_0')[0] for f in tiles] #['east-africa_10', 'japan_10', 'nigeria_10']
-    # visualise_prediction_tile(tiles,model=model,data_folder='data_testing/')
+    # tiles = ['10_points_filtered_22_04/S2B_MSIL2A_20220429T023239_N0400_R103_T50JLN_20220429T060411']
     
     # make folder to store results
     results_dir = f'{model_dir}/results'
     os.makedirs(results_dir, exist_ok=True)
 
+    visualise_prediction_tile(tiles,model=model,data_folder='/phileo_data/mini_foundation/mini_foundation_tifs', results_dir=results_dir)
 
-    x_train, y_train, x_val, y_val, x_test, y_test = data_protocol_bd.protocol_regions(folder=DATA_FOLDER, regions=REGIONS, y='geography')
+    # x_train, y_train, x_val, y_val, x_test, y_test = data_protocol_bd.protocol_regions(folder=DATA_FOLDER, regions=REGIONS, y='geography')
     
-    _, _, dl_test = load_data(x_train, y_train, x_val, y_val, x_test, y_test,
-                                        with_augmentations=False,
-                                        num_workers=0,
-                                        batch_size=64,
-                                        encoder_only=True,
-                                        )
+    # _, _, dl_test = load_data(x_train, y_train, x_val, y_val, x_test, y_test,
+    #                                     with_augmentations=False,
+    #                                     num_workers=0,
+    #                                     batch_size=64,
+    #                                     encoder_only=True,
+    #                                     )
     
-    save_path_visualisations = f"{model_dir}/results/vis.png"
-    metrics = evaluate_model(model, dl_test, device,results_dir, num_visualisations=16*3)
+    # save_path_visualisations = f"{model_dir}/results/vis.png"
+    # metrics = evaluate_model(model, dl_test, device,results_dir, num_visualisations=16*3)
 
 
-    with open(f'{results_dir}/{date.today().strftime("%d%m%Y")}_metrics.json', 'w') as fp:
-        json.dump(metrics, fp)
+    # with open(f'{results_dir}/{date.today().strftime("%d%m%Y")}_metrics.json', 'w') as fp:
+    #     json.dump(metrics, fp)
 
 

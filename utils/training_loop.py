@@ -148,20 +148,20 @@ def training_loop(
                     save_dir = f'{out_folder}/visualisations/'
                     os.makedirs(save_dir, exist_ok=True)
 
-                    running_region = 0
                     running_coords=0
                     running_kg = 0
+                    running_time = 0
                     for j, (images, labels) in enumerate(val_loader):
                         images = images.to(device)
                         labels = labels.to(device)
 
                         outputs = model(images)
 
-                        loss, region_loss, coord_loss, kg_loss = criterion(outputs, labels)
+                        loss, coord_loss, kg_loss, time_loss = criterion(outputs, labels)
                         val_loss += loss.item()
                         running_coords += coord_loss.item()
-                        running_region += region_loss.item()
                         running_kg += kg_loss.item()
+                        running_time += time_loss.item()
 
 
                         # if labels.shape != outputs.shape:
@@ -180,7 +180,7 @@ def training_loop(
                 train_pbar.set_postfix({
                     "loss": f"{train_loss / (i + 1):.4f}",
                     **{name: f"{value / (i + 1):.4f}" for name, value in train_metrics_values.items()},
-                    "val_loss": f"{val_loss / (j + 1):.4f}","region_loss": f"{running_region / (j + 1):.4f}","coord_loss": f"{running_coords / (j + 1):.4f}","kg_loss": f"{running_kg / (j + 1):.4f}",
+                    "val_loss": f"{val_loss / (j + 1):.4f}","coord_loss": f"{running_coords / (j + 1):.4f}","kg_loss": f"{running_kg / (j + 1):.4f}","time_loss": f"{running_time / (j + 1):.4f}",
                     **{f"val_{name}": f"{value / (j + 1):.4f}" for name, value in val_metrics_values.items()},
                     f"lr": optimizer.param_groups[0]['lr'],
                 }, refresh=True)
@@ -190,7 +190,6 @@ def training_loop(
 
                 cl.append(running_coords/ (j + 1))
                 kgl.append(running_kg/ (j + 1))
-                rl.append(running_region/ (j + 1))
 
                 # # Update the scheduler
                 if lr_scheduler == 'cosine_annealing':
@@ -232,7 +231,6 @@ def training_loop(
         plt.plot(e, vl, label='Validation Loss')
         plt.plot(e, cl, label='Coord Loss')
         plt.plot(e, kgl, label='kg Loss')
-        plt.plot(e, rl, label='region Loss')
 
         plt.legend()
         plt.savefig(os.path.join(out_folder, f"loss.png"))

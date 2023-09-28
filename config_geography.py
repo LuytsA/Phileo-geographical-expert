@@ -1,11 +1,18 @@
 regions = {'north-america':0,'japan':1, 'east-africa':2, 'europe':3,'eq-guinea':4,'south-america':5, 'nigeria':6, 'senegal':7}
 region_inv = {v:k for k,v in zip(regions.keys(),regions.values())}
 
-feature_positions_predictions = {'kg': [i for i in range(31)], 'coords':[31,32,33], 'region':[j for j in range(34,34+len(regions))]}
-feature_positions_label = {'pre_aug':{'kg': [i for i in range(31)], 'coords':[31,32], 'region':[33]}, 'post_aug':{'kg': [i for i in range(31)], 'coords':[31,32,33], 'region':[34]}}
+# feature_positions_predictions = {'kg': [i for i in range(31)], 'coords':[31,32,33], 'region':[j for j in range(34,34+len(regions))]}
+# feature_positions_label = {'pre_aug':{'kg': [i for i in range(31)], 'coords':[31,32], 'region':[33]}, 'post_aug':{'kg': [i for i in range(31)], 'coords':[31,32,33], 'region':[34]}}
 
-kg_map={
-        0: {'climate_class': 0,
+feature_positions_predictions = {'kg': [i for i in range(31)], 'coords':[31,32,33], 'time':[34,35]}
+feature_positions_label = {'kg': [i for i in range(31)], 'coords':[31,32,33], 'time':[34,35]}
+
+
+# kg_map={-1: {'climate_class': -1,
+#             'climate_class_str': 'ND',
+#             'description': 'No Data',
+#             'colour_code': [255, 255, 255]},
+kg_map={0: {'climate_class': 0,
             'climate_class_str': 'S',
             'description': 'sea',
             'colour_code': [0, 0, 0]},
