@@ -1,7 +1,6 @@
-import sys; sys.path.append("../")
 import torch
 import torch.nn as nn
-from utils import get_activation, get_normalization, SE_Block, MvFM_layer
+from utils import get_activation, get_normalization, SE_Block
 
 
 class CoreCNNBlock(nn.Module):
@@ -152,7 +151,7 @@ class CoreDecoderBlock(nn.Module):
 
         self.blocks = nn.Sequential(*self.blocks)
     
-    def forward(self, x, skip): # y is the skip connection
+    def forward(self, x, skip):
         x = self.upsample(x)
         attn_s, attn_c = self.attention(x, skip)
         x = torch.cat([x, (skip * attn_s) + (skip + attn_c)], dim=1)
@@ -165,16 +164,21 @@ class CoreDecoderBlock(nn.Module):
 
 
 class CoreUnet(nn.Module):
-    def __init__(self, *, input_dim=10, output_dim=1, depths=None, dims=None, clamp_output=False, clamp_min=0.0, clamp_max=1.0, activation="relu", norm="batch", padding="same"):
+    def __init__(self, *,
+        input_dim=10,
+        output_dim=1,
+        depths=None,
+        dims=None,
+        activation="relu",
+        norm="batch",
+        padding="same",
+    ):
         super(CoreUnet, self).__init__()
 
         self.depths = [3, 3, 9, 3] if depths is None else depths
         self.dims = [96, 192, 384, 768] if dims is None else dims
         self.output_dim = output_dim
         self.input_dim = input_dim
-        self.clamp_output = clamp_output
-        self.clamp_min = clamp_min
-        self.clamp_max = clamp_max
         self.activation = activation
         self.norm = norm
         self.padding = padding
@@ -241,24 +245,26 @@ class CoreUnet(nn.Module):
 
         x = self.head(x)
 
-        if self.clamp_output:
-            x = torch.clamp(x, self.clamp_min, self.clamp_max)
-
         return x
 
 
 
 class CoreEncoder(nn.Module):
-    def __init__(self, *, input_dim=10, output_dim=1, depths=None, dims=None, clamp_output=False, clamp_min=0.0, clamp_max=1.0, activation="relu", norm="batch", padding="same"):
+    def __init__(self, *,
+        input_dim=10,
+        output_dim=1,
+        depths=None,
+        dims=None,
+        activation="relu",
+        norm="batch",
+        padding="same",
+    ):
         super(CoreEncoder, self).__init__()
 
         self.depths = [3, 3, 9, 3] if depths is None else depths
         self.dims = [96, 192, 384, 768] if dims is None else dims
         self.output_dim = output_dim
         self.input_dim = input_dim
-        self.clamp_output = clamp_output
-        self.clamp_min = clamp_min
-        self.clamp_max = clamp_max
         self.activation = activation
         self.norm = norm
         self.padding = padding
@@ -287,13 +293,13 @@ class CoreEncoder(nn.Module):
             nn.Linear(self.dims[-1], self.output_dim),
         )
 
-        self.head_MvMF = nn.Sequential(
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Flatten(),
-            nn.Linear(in_features=self.dims[-1], out_features=self.output_dim, bias=False),
-            nn.Softmax(dim=1),
-            #MvFM_layer(n_center=175, feature_dim= self.dims[-1]),
-        )
+        # self.head_MvMF = nn.Sequential(
+        #     nn.AdaptiveAvgPool2d((1, 1)),
+        #     nn.Flatten(),
+        #     nn.Linear(in_features=self.dims[-1], out_features=self.output_dim, bias=False),
+        #     nn.Softmax(dim=1),
+        #     #MvFM_layer(n_center=175, feature_dim= self.dims[-1]),
+        # )
 
     def forward(self, x):
         x = self.stem(x)
@@ -301,78 +307,11 @@ class CoreEncoder(nn.Module):
         for block in self.encoder_blocks:
             x, _ = block(x)
 
-        # x = self.head(x)
-        x = self.head_MvMF(x)
+        x = self.head(x)
+        # x = self.head_MvMF(x)
 
-        # if self.clamp_output:
-        #     x = torch.clamp(x1, self.clamp_min, self.clamp_max)
 
         return x
-
-def CoreUnet_atto(**kwargs):
-    model = CoreUnet(depths=[2, 2, 6, 2], dims=[40, 80, 160, 320], **kwargs)
-    return model
-
-def CoreUnet_femto(**kwargs):
-    model = CoreUnet(depths=[2, 2, 6, 2], dims=[48, 96, 192, 384], **kwargs)
-    return model
-
-def CoreUnet_pico(**kwargs):
-    model = CoreUnet(depths=[2, 2, 6, 2], dims=[64, 128, 256, 512], **kwargs)
-    return model
-
-def CoreUnet_nano(**kwargs):
-    model = CoreUnet(depths=[2, 2, 8, 2], dims=[80, 160, 320, 640], **kwargs)
-    return model
-
-def CoreUnet_tiny(**kwargs):
-    model = CoreUnet(depths=[3, 3, 9, 3], dims=[96, 192, 384, 768], **kwargs)
-    return model
-
-def CoreUnet_base(**kwargs):
-    model = CoreUnet(depths=[3, 3, 27, 3], dims=[128, 256, 512, 1024], **kwargs)
-    return model
-
-def CoreUnet_large(**kwargs):
-    model = CoreUnet(depths=[3, 3, 27, 3], dims=[192, 384, 768, 1536], **kwargs)
-    return model
-
-def CoreUnet_huge(**kwargs):
-    model = CoreUnet(depths=[3, 3, 27, 3], dims=[352, 704, 1408, 2816], **kwargs)
-    return model
-
-def Core_atto(**kwargs):
-    model = CoreEncoder(depths=[2, 2, 6, 2], dims=[40, 80, 160, 320], **kwargs)
-    return model
-
-def Core_femto(**kwargs):
-    model = CoreEncoder(depths=[2, 2, 6, 2], dims=[48, 96, 192, 384], **kwargs)
-    return model
-
-def Core_pico(**kwargs):
-    model = CoreEncoder(depths=[2, 2, 6, 2], dims=[64, 128, 256, 512], **kwargs)
-    return model
-
-def Core_nano(**kwargs):
-    model = CoreEncoder(depths=[2, 2, 8, 2], dims=[80, 160, 320, 640], **kwargs)
-    return model
-
-def Core_tiny(**kwargs):
-    model = CoreEncoder(depths=[3, 3, 9, 3], dims=[96, 192, 384, 768], **kwargs)
-    return model
-
-def Core_base(**kwargs):
-    model = CoreEncoder(depths=[3, 3, 27, 3], dims=[128, 256, 512, 1024], **kwargs)
-    return model
-
-def Core_large(**kwargs):
-    model = CoreEncoder(depths=[3, 3, 27, 3], dims=[192, 384, 768, 1536], **kwargs)
-    return model
-
-def Core_huge(**kwargs):
-    model = CoreEncoder(depths=[3, 3, 27, 3], dims=[352, 704, 1408, 2816], **kwargs)
-    return model
-
 
 
 if __name__ == "__main__":
@@ -383,7 +322,7 @@ if __name__ == "__main__":
     HEIGHT = 64
     WIDTH = 64
 
-    model = Core_tiny(
+    model = CoreUnet(
         input_dim=10,
         output_dim=1,
     )
@@ -394,15 +333,3 @@ if __name__ == "__main__":
         model,
         input_size=(BATCH_SIZE, CHANNELS, HEIGHT, WIDTH),
     )
-
-# ====================================================================================================
-# Total params: 2,326,921
-# Trainable params: 2,326,921
-# Non-trainable params: 0
-# Total mult-adds (G): 16.61
-# ====================================================================================================
-# Input size (MB): 5.24
-# Forward/backward pass size (MB): 1992.11
-# Params size (MB): 9.31
-# Estimated Total Size (MB): 2006.66
-# ====================================================================================================
