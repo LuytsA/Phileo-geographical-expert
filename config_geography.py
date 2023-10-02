@@ -1,11 +1,15 @@
-regions = {'north-america':0,'japan':1, 'east-africa':2, 'europe':3,'eq-guinea':4,'south-america':5, 'nigeria':6, 'senegal':7}
-region_inv = {v:k for k,v in zip(regions.keys(),regions.values())}
+USE_MvMFloss = True
+if USE_MvMFloss:
+    import numpy as np
+    centers = np.load('centers_all_more_enc.npy')
+    coord_pos_pred = [31 + i for i in range(len(centers)) ]
+    date_pos_pred = [max(coord_pos_pred)+1, max(coord_pos_pred)+2]
+else:
+    coord_pos_pred = [31,32,33]
+    date_pos_pred = [34,35]
 
-# feature_positions_predictions = {'kg': [i for i in range(31)], 'coords':[31,32,33], 'region':[j for j in range(34,34+len(regions))]}
-# feature_positions_label = {'pre_aug':{'kg': [i for i in range(31)], 'coords':[31,32], 'region':[33]}, 'post_aug':{'kg': [i for i in range(31)], 'coords':[31,32,33], 'region':[34]}}
-
-feature_positions_predictions = {'kg': [i for i in range(31)], 'coords':[31,32,33], 'time':[34,35]}
-feature_positions_label = {'kg': [i for i in range(31)], 'coords':[31,32,33], 'time':[34,35]}
+feature_positions_predictions = {'kg': [i for i in range(31)], 'coords':coord_pos_pred, 'date':date_pos_pred}
+feature_positions_label = {'kg': [i for i in range(31)], 'coords':[31,32,33], 'date':[34,35]}
 
 
 # kg_map={-1: {'climate_class': -1,
