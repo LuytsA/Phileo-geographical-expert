@@ -26,9 +26,9 @@ def encode_coordinates(coords):
     coordinates must be in lat-long of shape (n_coords, 2)
     Output is encoded coordinates of shape (n_coords, 3)
     '''
-    lat,long = coords
+    lat,long = coords.T
     lat = (-lat + 90)/180
     long_sin = (np.sin(long*2*np.pi/360)+1)/2
     long_cos = (np.cos(long*2*np.pi/360)+1)/2
 
-    return np.array([lat,long_sin,long_cos], dtype=np.float32)
+    return np.array([lat,long_sin,long_cos], dtype=np.float32).T

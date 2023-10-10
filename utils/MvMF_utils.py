@@ -20,7 +20,7 @@ class MvMFLoss(nn.Module):
 
     Initialisation parameters:
     center_inits, array:           array of shape (n_clusters, 2) containing the lat-long coordinates of all the centers
-    density_exponent_inits, array: array of shape (n_clusters) containing the exponents that characterise the density ( density = exp(density_exponent_inits) )
+    density_inits, array: array of shape (n_clusters) containing the exponents that characterise the density ( density = exp(density_inits) )
     centers_learnable, bool:       wrap the centers in a parameter so they can be updated during training
     density_learnable, bool:       wrap the density exponents in a parameter so they can be updated during training
     softmax_input, bool:           Gamma_i should sum to one, so if the output of the model are raw logits, they must be softmaxed first
@@ -48,10 +48,6 @@ class MvMFLoss(nn.Module):
         output: encoded coords of shape (batch_size, 3)
         '''
         encoded_coords = torch.zeros((coords.shape[0],3),dtype=coords.dtype)
-        # lat,long = coords.T
-        # lat = (-lat + 90)/180
-        # long_sin = (torch.sin(long*2*np.pi/360)+1)/2
-        # long_cos = (torch.cos(long*2*np.pi/360)+1)/2
         
         encoded_coords[:,0] = (-coords[:,0] + 90)/180 
         encoded_coords[:,1] = (torch.sin(coords[:,1]*2*torch.pi/360) + 1)/2

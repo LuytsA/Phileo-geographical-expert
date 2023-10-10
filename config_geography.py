@@ -1,7 +1,8 @@
 USE_MvMFloss = True
 if USE_MvMFloss:
     import numpy as np
-    centers = np.load('centers_all_more_enc.npy')
+    centers = np.load('centers_random_land.npy') 
+
     coord_pos_pred = [31 + i for i in range(len(centers)) ]
     date_pos_pred = [max(coord_pos_pred)+1, max(coord_pos_pred)+2]
 else:
