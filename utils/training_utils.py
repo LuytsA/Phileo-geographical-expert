@@ -84,9 +84,9 @@ class GeographicalLoss(nn.Module):
         self.coord_loss = coordinate_loss
         self.date_loss = date_loss
 
-        self.weights = np.array([1,3,4])
+        self.weights = np.array([1,5,8])
         self.weights = self.weights/self.weights.sum()
-        
+        print(self.weights)
         # dictionary containing {climate class : [subclasses]}
         self.climate_classes = {}
         kg_map = config_geography.kg_map
@@ -306,7 +306,7 @@ class SE_BlockV3(nn.Module):
 
 def get_activation(activation_name):
     if activation_name == "relu":
-        return nn.ReLU6(inplace=True)
+        return nn.ReLU6(inplace=False)
     elif isinstance(activation_name, torch.nn.modules.activation.ReLU6):
         return activation_name
 

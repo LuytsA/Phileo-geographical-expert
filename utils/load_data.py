@@ -9,7 +9,6 @@ import numpy as np
 # PyTorch
 import torch
 from torch.utils.data import DataLoader
-from utils.training_utils import encode_coordinates
 import config_geography
 pos_feature_pred = config_geography.feature_positions_predictions
 pos_feature_label = config_geography.feature_positions_label
@@ -42,11 +41,6 @@ def callback_preprocess(x, y):
 
 def callback_postprocess_encoder(x, y):
     x = beo.channel_last_to_first(x)
-
-    # y_kg,y_coords = y[pos_feature_label['pre_aug']['kg']],y[pos_feature_label['pre_aug']['coords']] # len(y)=34
-    # y_coords_encoded = encode_coordinates(y_coords)
-    # y = np.concatenate([y_kg,y_coords_encoded],dtype=np.float32) # len(y)=35
-
 
     return torch.from_numpy(x), torch.from_numpy(y)
 
@@ -101,7 +95,7 @@ def load_data(x_train, y_train, x_val, y_val, x_test, y_test, with_augmentations
     ds_val = beo.Dataset(x_test, y_test,  callback=callback_encoder if encoder_only else callback_decoder) #beo.Dataset(x_val, y_val, callback=callback_encoder if encoder_only else callback_decoder)
 
     dl_train = InfiniteDataLoader(ds_train, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=num_workers, drop_last=True, generator=torch.Generator(device='cuda'))
-    dl_test = DataLoader(ds_test, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=num_workers, drop_last=True, generator=torch.Generator(device='cuda'))
-    dl_val = DataLoader(ds_val, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=num_workers, drop_last=True, generator=torch.Generator(device='cuda'))
+    dl_test = DataLoader(ds_test, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=num_workers, drop_last=True, generator=torch.Generator(device='cuda'))
+    dl_val = DataLoader(ds_val, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=num_workers, drop_last=True, generator=torch.Generator(device='cuda'))
 
     return dl_train, dl_val, dl_test

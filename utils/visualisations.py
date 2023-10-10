@@ -21,34 +21,13 @@ import matplotlib.pyplot as plt
 import buteo as beo
 import tqdm
 
+from utils.encoding_utils import decode_coordinates, encode_coordinates,decode_date
+
 import config_geography
 pos_feature_pred = config_geography.feature_positions_predictions
 pos_feature_label = config_geography.feature_positions_label
 
 
-
-
-def decode_date(encoded_date):
-    doy_sin,doy_cos = encoded_date
-    doy = np.arctan2((2*doy_sin-1),(2*doy_cos-1))*365/(2*np.pi)
-    if doy<1:
-        doy+=365
-    return np.array([np.round(doy)])
-
-
-def decode_coordinates(encoded_coords):
-    lat_enc,long_sin,long_cos = encoded_coords
-    lat = -lat_enc*180+90
-    long = np.arctan2((2*long_sin-1),(2*long_cos-1))*360/(2*np.pi)
-    return np.array([lat,long])
-
-def encode_coordinates(coords):
-    lat,long = coords
-    lat = (-lat + 90)/180
-    long_sin = (np.sin(long*2*np.pi/360)+1)/2
-    long_cos = (np.cos(long*2*np.pi/360)+1)/2
-
-    return np.array([lat,long_sin,long_cos], dtype=np.float32)
 
 
 
@@ -112,7 +91,7 @@ def visualise(x, y, y_pred=None, images=5, channel_first=False, vmin=0, vmax=1, 
 
         # c_soft = np.exp(coord_pred_center[idx])/np.sum(np.exp(coord_pred_center[idx]),keepdims=True)
         # nearest_center_soft = centers[np.argmax(c_soft)]
-        lat_pred,long_pred = decode_coordinates(nearest_center)#coord_pred)
+        lat_pred,long_pred = nearest_center #decode_coordinates(nearest_center)#coord_pred)
         
 
         lat,long = decode_coordinates(coord_true)

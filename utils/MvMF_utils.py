@@ -1,9 +1,9 @@
 import numpy as np
-from utils.visualisations import encode_coordinates, decode_coordinates
+from utils.encoding_utils import encode_coordinates, decode_coordinates
 from matplotlib import pyplot as plt
 import cartopy.crs as crs
 import cartopy.feature as cfeature
-
+from tqdm import tqdm 
 import torch
 import torch.nn as nn
 
@@ -19,7 +19,7 @@ class MvMFLoss(nn.Module):
     The loss itself is the negative logarithm of the distribution: loss = - log(MvMF)
 
     Initialisation parameters:
-    center_inits, array:           array of shape (n_clusters, 3) containing the encoded coordinates of all the centers
+    center_inits, array:           array of shape (n_clusters, 2) containing the lat-long coordinates of all the centers
     density_exponent_inits, array: array of shape (n_clusters) containing the exponents that characterise the density ( density = exp(density_exponent_inits) )
     centers_learnable, bool:       wrap the centers in a parameter so they can be updated during training
     density_learnable, bool:       wrap the density exponents in a parameter so they can be updated during training
@@ -41,6 +41,23 @@ class MvMFLoss(nn.Module):
 
         self.prep_weights = nn.Softmax(dim=1) if softmax_input else nn.Identity()
 
+
+    def encode_coordinates_torch(self, coords):
+        '''
+        inputs coords in lat-long of shape (batch_size, 2)
+        output: encoded coords of shape (batch_size, 3)
+        '''
+        encoded_coords = torch.zeros((coords.shape[0],3),dtype=coords.dtype)
+        # lat,long = coords.T
+        # lat = (-lat + 90)/180
+        # long_sin = (torch.sin(long*2*np.pi/360)+1)/2
+        # long_cos = (torch.cos(long*2*np.pi/360)+1)/2
+        
+        encoded_coords[:,0] = (-coords[:,0] + 90)/180 
+        encoded_coords[:,1] = (torch.sin(coords[:,1]*2*torch.pi/360) + 1)/2
+        encoded_coords[:,2] = (torch.cos(coords[:,1]*2*torch.pi/360) + 1)/2
+
+        return encoded_coords
 
     def dist_encoded(self, coord_true, centers):
         '''
@@ -80,7 +97,9 @@ class MvMFLoss(nn.Module):
         # loss_naive = -torch.log(weighted_sum)
 
         # safer version based on evaluation of log-sum-exp
-        dist = self.dist_encoded(coord_true=encoded_coordinate, centers=self.centers)
+        centers_encoded = self.encode_coordinates_torch(self.centers)
+        dist = self.dist_encoded(coord_true=encoded_coordinate, centers=centers_encoded)
+        
         gamma = torch.log(2*weights) + self.densities + torch.mul(torch.exp(self.densities), dist-1)
         gamma_max = torch.max(gamma, dim=-1, keepdim=True)[0]
         deltas = gamma - gamma_max
@@ -172,6 +191,50 @@ class MvMF_visuals():
         return np.matmul(np.exp(llh_components), center_activations.T)
 
 
+
+    # def MvMF_loss_best_torch(self, coordinate,weights, density,centers, batch_size=64):
+
+    #     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    #     final_probs = np.zeros(coordinate.shape[1])-10000
+
+    #     distances = self.dist_encoded(coordinate,centers).T
+
+    #     closest_center_dist = np.max(distances, axis=-1)
+    #     closest_points = np.where(closest_center_dist>0.90)
+    #     relevant_points = distances[closest_points]
+        
+    #     batches = distances.shape[0]//batch_size +1
+        
+    #     ds = torch.zeros(relevant_points.shape[0]).to(device)
+    #     relevant_points = torch.tensor(relevant_points).to(device)
+
+    #     exp_weights = np.exp(weights)
+    #     weights = exp_weights/np.sum(exp_weights, axis=-1, keepdims=True)
+
+    #     density = torch.tensor(density).to(device)
+    #     weights = torch.tensor(weights).to(device)
+
+    #     for i in tqdm(range(batches)):
+            
+    #         dist = relevant_points[batch_size*i:batch_size*(i+1)]
+    #         gamma_points = torch.exp(density.squeeze())* (dist-1)
+    #         gamma_weights = torch.log(2*weights) + density
+
+    #         gamma = gamma_points[:,None,:] + gamma_weights[None,:,:]
+    #         gamma_max = torch.max(gamma, dim=-1, keepdims=True)[0]
+    #         deltas = gamma - gamma_max
+    #         loss = gamma_max + torch.log(torch.sum(torch.exp(deltas),axis=-1, keepdims=True))
+    #         loss = torch.mean(loss.squeeze(), axis=-1)
+    #         ds[batch_size*i:batch_size*(i+1)] = loss #.cpu().numpy()
+
+    #     final_probs[closest_points] = ds.cpu().numpy()
+    #     final_probs = np.exp(final_probs)
+
+    #     import pdb; pdb.set_trace()
+
+    #     return final_probs
+
+
     def distribution_global_pred(self, weights):
         '''
         weights:    Output of the model, raw_logits of shape (n_patches, n_clusters). All weights should come from patches of the same S2 tile.
@@ -184,6 +247,7 @@ class MvMF_visuals():
         '''
 
         global_activations = self.MvMF_llh(self.coords_global_enc, weights = weights, density=self.densities, centers=self.centers.T )
+        # global_activations = self.MvMF_loss_best_torch(self.coords_global_enc, weights = weights, density=self.densities, centers=self.centers.T )
         activated_centers, counts = np.unique(np.argmax(weights, axis=1), return_counts=True)
         centers_dec = np.array([decode_coordinates(c) for c in self.centers])
         pred_coord = centers_dec[activated_centers]
@@ -239,7 +303,7 @@ class MvMF_visuals():
                     alpha=1,
                     transform=crs.PlateCarree(),
                     zorder=5) ## Important
-
+        plt.colorbar()
         plt.title('coordinate distribution over patches')
     
 
