@@ -51,6 +51,9 @@ The loss function for climate zones consists of two times CrossentropyLoss. One 
 ### Date loss
 Date loss is the most simple of the losses. It is an MSELoss on the encoded day of the year.
 
+## Get started
+Showcase examples and usefull background can be found in preliminaries.ipynb
+
 ## notes
 - The labels contain encoded coordinates and encoded day of year instead of standard lat-long or days. Also the loss functions expect encoded values. To decode/encode values please take a look at the decode/encode functions in utils.visualisations.
 
