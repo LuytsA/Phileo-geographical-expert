@@ -99,7 +99,7 @@ class MLPMixerLayer(nn.Module):
         self.bn1 = nn.BatchNorm2d(self.num_patches)
         self.mix_channel = nn.Sequential( # B, P, T, C
             nn.Linear(self.embed_dims, int(self.embed_dims * self.expansion)),
-            nn.GELU(),
+            nn.ReLU6(),
             nn.Dropout(drop_n) if drop_n > 0. else nn.Identity(),
             nn.Linear(int(self.embed_dims * self.expansion), self.embed_dims),
         )
@@ -107,7 +107,7 @@ class MLPMixerLayer(nn.Module):
         self.bn2 = nn.BatchNorm2d(self.num_patches)
         self.mix_patch = nn.Sequential( # B, C, T, P
             nn.Linear(self.num_patches, int(self.num_patches * self.expansion)),
-            nn.GELU(),
+            nn.ReLU6(),
             nn.Dropout(drop_n) if drop_n > 0. else nn.Identity(),
             nn.Linear(int(self.num_patches * self.expansion), self.num_patches),
         )
@@ -115,7 +115,7 @@ class MLPMixerLayer(nn.Module):
         self.bn3 = nn.BatchNorm2d(self.num_patches)
         self.mix_token = nn.Sequential( # B, P, C, T
             nn.Linear(self.tokens, int(self.tokens * self.expansion)),
-            nn.GELU(),
+            nn.ReLU6(),
             nn.Dropout(drop_n) if drop_n > 0. else nn.Identity(),
             nn.Linear(int(self.tokens * self.expansion), self.tokens),
         )
