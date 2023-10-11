@@ -1,15 +1,21 @@
 # Geographic Aware Expert
 
+# Table Of Contents
+1. [Introduction](#introduction)
+2. [Data](#data)
+3. [Geographic Aware Loss](#geoloss)
+4. [Get Started](#getstarted)
+5. [Notes](#notes)
 
-## Introduction
+## Introduction <a name="introduction"></a>
 This repo contains all the code necessary to train a model on the pretext task of "geographic awareness". This means the model learns geo-localisation, seasonality and identify climate zones. It is trained in a supervised approach on coordinate labels, climate zone lables and day of the year labels.
 
-## Data
+## Data <a name="data"></a>
 Models are trained on the minifoundation dataset. It consists of more than 100 tiles all around the world at different capture times. The labels used to train are the Koppen-Geiger climate zones, coordinates and day of year the data was captured. Models are trained on the geo-label which are of shape (31 + 3 + 2) referring to the 31 Koppen-Geiger climate classes, 3 coordinate labels (latitude, encoded sine of longitude and encoded cosine of longitude). 
 
 More details on dataset and labels can be found here https://github.com/LuytsA/phileo-dataset or in config_geography.py
 
-## Geographic aware loss
+## Geographic aware loss <a name="geoloss"></a>
 
 The geographic aware loss function (utils.training_utils.GeographicalLoss) is a weighted average of three seperate losses. In some images only sea is visible and since it is extremely hard to localise a patch of sea or predict the day of the year such a image was taken, the loss function calculates coordinate loss and time of year loss only for non-sea patches.
 
@@ -37,7 +43,7 @@ They can be interpreted as logits to which cluster (class) the input image belon
 The loss itself is the negative logarithm of the distribution: 
 $$\text{loss} = - \log(\text{MvMF})$$
 
-The use this loss it must be initialised by providing centers and densities. These centers and densities can be taken to be parameters that are optimised during training. For example when the training sets contains images from 200 locations around the world, it makes sense to sample from each location 1-5 centers resulting in a total of 200-1000 centers around the world. As described in [1] different density correspond to sensitivity at certain scales from $\text{density}=\exp 4 \sim $ 2500km to $\text{density}=\exp 14 \sim $ 25km. At the global scale this model is localising Sentinel-2 tiles it seems reasonable to initialise centers around $\exp 7$ and optimise the densities during training.
+The use this loss it must be initialised by providing centers and densities. These centers and densities can be taken
 
 [1] Izbicki, Michael et al. “Exploiting the Earth's Spherical Geometry to Geolocate Images.” ECML/PKDD (2019).
 
@@ -51,10 +57,10 @@ The loss function for climate zones consists of two times CrossentropyLoss. One 
 ### Date loss
 Date loss is the most simple of the losses. It is an MSELoss on the encoded day of the year.
 
-## Get started
+## Get started <a name="getstarted"></a>
 Showcase examples and usefull background can be found in preliminaries.ipynb
 
-## notes
+## notes <a name="notes"></a>
 - The labels contain encoded coordinates and encoded day of year instead of standard lat-long or days. Also the loss functions expect encoded values. To decode/encode values please take a look at the decode/encode functions in utils.visualisations.
 
 - When the data scales up to $10^3-10^6$ locations or even more it is not necesarrily clear how the initalisation centers need to be chosen. In the original paper they use up to $2^{15}$ classes so maybe the amount of centers can be very high.

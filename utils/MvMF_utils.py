@@ -1,6 +1,7 @@
 import numpy as np
 from utils.encoding_utils import encode_coordinates, decode_coordinates
 from matplotlib import pyplot as plt
+import matplotlib
 import cartopy.crs as crs
 import cartopy.feature as cfeature
 from tqdm import tqdm 
@@ -137,12 +138,16 @@ class MvMF_visuals():
 
     '''
     
-    def __init__(self, centers, densities):
+    def __init__(self, centers, densities, encode_centers=False):
         self.centers = centers 
         self.densities = densities 
 
-        self.coords_global = get_coordinate_array([-89,89,-178.5,178.5], shape=(600,600)).reshape((2,-1))
-        self.coords_global_enc = np.array([encode_coordinates(self.coords_global[:,i]) for i in range(self.coords_global.shape[1])]).swapaxes(0,1)
+        if encode_centers:
+            self.centers = encode_coordinates(self.centers)
+
+
+        self.coords_global = get_coordinate_array([-89,89,-178.5,178.5], shape=(600,600)).reshape((2,-1)).T
+        self.coords_global_enc = encode_coordinates(self.coords_global) #np.array([encode_coordinates(self.coords_global[:,i]) for i in range(self.coords_global.shape[1])]).swapaxes(0,1)
 
 
     def dist_encoded(self, coords, centers):
@@ -153,8 +158,8 @@ class MvMF_visuals():
         if coords.shape = (N, 3) and centers.shape = (n_clusters,3) the output will have shape (N, n_clusters) 
         '''
 
-        lat1_enc,long1_sin, long1_cos = coords[0,:], (2*coords[1,:]-1), (2*coords[2,:]-1)
-        lat2_enc,long2_sin, long2_cos = centers[0,:],(2*centers[1,:]-1), (2*centers[2,:]-1)
+        lat1_enc,long1_sin, long1_cos = coords[:,0], (2*coords[:,1]-1), (2*coords[:,2]-1)
+        lat2_enc,long2_sin, long2_cos = centers[:,0],(2*centers[:,1]-1), (2*centers[:,2]-1)
 
         lat1_r = lat1_enc*np.pi
         lat2_r = lat2_enc*np.pi
@@ -164,6 +169,31 @@ class MvMF_visuals():
         
         return np.outer(np.sin(lat2_r),np.sin(lat1_r))*cos_dif +np.outer(np.cos(lat2_r),np.cos(lat1_r))
 
+    def get_heatmap(self, coordinate, density, centers, weights, max_clusters=None, clip=True):
+        exp_weights = np.exp(weights)
+        soft_maxed = exp_weights/np.sum(exp_weights, axis=-1, keepdims=True)
+        soft_maxed = np.mean(soft_maxed, axis=0)
+    
+        if max_clusters is not None:
+                most_active_clusters = np.argsort(soft_maxed)[-50:]
+                density=density.squeeze()[most_active_clusters]
+                centers=centers[most_active_clusters]
+                soft_maxed = soft_maxed[most_active_clusters]
+                print(centers.shape)
+        
+        dist = self.dist_encoded(coordinate,centers).T
+
+
+
+        if clip:
+            densest_centers_grid = np.sort(dist.max(axis=0))
+            
+            dist = np.clip(dist, -1, densest_centers_grid[0])
+        
+        log_distribution = density + np.exp(density)*(dist-1)
+        distribution = np.exp(log_distribution)
+        return np.matmul(distribution, soft_maxed.T)
+    
 
     def MvMF_llh(self, coordinate,weights, density,centers):
         '''
@@ -188,69 +218,26 @@ class MvMF_visuals():
 
 
 
-    # def MvMF_loss_best_torch(self, coordinate,weights, density,centers, batch_size=64):
-
-    #     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    #     final_probs = np.zeros(coordinate.shape[1])-10000
-
-    #     distances = self.dist_encoded(coordinate,centers).T
-
-    #     closest_center_dist = np.max(distances, axis=-1)
-    #     closest_points = np.where(closest_center_dist>0.90)
-    #     relevant_points = distances[closest_points]
-        
-    #     batches = distances.shape[0]//batch_size +1
-        
-    #     ds = torch.zeros(relevant_points.shape[0]).to(device)
-    #     relevant_points = torch.tensor(relevant_points).to(device)
-
-    #     exp_weights = np.exp(weights)
-    #     weights = exp_weights/np.sum(exp_weights, axis=-1, keepdims=True)
-
-    #     density = torch.tensor(density).to(device)
-    #     weights = torch.tensor(weights).to(device)
-
-    #     for i in tqdm(range(batches)):
-            
-    #         dist = relevant_points[batch_size*i:batch_size*(i+1)]
-    #         gamma_points = torch.exp(density.squeeze())* (dist-1)
-    #         gamma_weights = torch.log(2*weights) + density
-
-    #         gamma = gamma_points[:,None,:] + gamma_weights[None,:,:]
-    #         gamma_max = torch.max(gamma, dim=-1, keepdims=True)[0]
-    #         deltas = gamma - gamma_max
-    #         loss = gamma_max + torch.log(torch.sum(torch.exp(deltas),axis=-1, keepdims=True))
-    #         loss = torch.mean(loss.squeeze(), axis=-1)
-    #         ds[batch_size*i:batch_size*(i+1)] = loss #.cpu().numpy()
-
-    #     final_probs[closest_points] = ds.cpu().numpy()
-    #     final_probs = np.exp(final_probs)
-
-    #     import pdb; pdb.set_trace()
-
-    #     return final_probs
-
-
     def distribution_global_pred(self, weights):
         '''
         weights:    Output of the model, raw_logits of shape (n_patches, n_clusters). All weights should come from patches of the same S2 tile.
                     Global probability map is computed by taking into account all predictions on the smaller (e.g. 128x128) patches. Output weights will be softmaxed first.
 
         outputs
-        global_activations:  global probability map based on all weights
+        heatmap:             global probability map based on all weights, better known as a heatmap
         pred_coords:         coordinates (in lat-long) of the most likely centers for each patch
         counts:              The amount of times a center was the most likely
         '''
 
-        global_activations = self.MvMF_llh(self.coords_global_enc, weights = weights, density=self.densities, centers=self.centers.T )
+        heatmap = self.get_heatmap(self.coords_global_enc, weights = weights, density=self.densities, centers=self.centers )
         # global_activations = self.MvMF_loss_best_torch(self.coords_global_enc, weights = weights, density=self.densities, centers=self.centers.T )
         activated_centers, counts = np.unique(np.argmax(weights, axis=1), return_counts=True)
-        centers_dec = np.array([decode_coordinates(c) for c in self.centers])
+        centers_dec = decode_coordinates(self.centers) #np.array([decode_coordinates(c) for c in self.centers])
         pred_coord = centers_dec[activated_centers]
 
-        return global_activations, pred_coord, counts
+        return heatmap, pred_coord, counts
 
-    def plot_globe_dist(self, ax, dss, pred_coord, coord_true, counts):
+    def plot_globe_dist(self, ax, dss, pred_coord=None, coord_true=None, counts=None):
         '''
         ax:  axis on which to draw probability map
         dss: global probility map for the coordinates
@@ -272,34 +259,36 @@ class MvMF_visuals():
 
         # ax.set_extent([20,55,-50,0])
         # ax.gridlines()
-        a = plt.scatter(x=self.coords_global[1,:], y=self.coords_global[0,:],  #x=long, y=lat
+        a = plt.scatter(x=self.coords_global[:,1], y=self.coords_global[:,0],  #x=long, y=lat
                     #color="dodgerblue",
                     c=dss,
                     s=1,
                     # cmap='hot',
                     alpha=0.5,
                     transform=crs.PlateCarree(),
-                    zorder=1
-                    #norm=matplotlib.colors.LogNorm() ## Important
+                    zorder=1,
+                    norm=matplotlib.colors.SymLogNorm(linthresh=0.1, vmin=1e-10) ## Important
             )
-
-        plt.scatter(x=pred_coord[:,1], y=pred_coord[:,0],  #x=long, y=lat
-                    color="white",
-                    #c=ds/np.max(ds),
-                    s=counts/10,
-                    alpha=0.8,
-                    transform=crs.PlateCarree(),
-                    zorder=4) ## Important
-
-        plt.scatter(x=coord_true[1], y=coord_true[0],  #x=long, y=lat
-                    color="red",
-                    #c=ds/np.max(ds),
-                    s=40,
-                    marker='*',
-                    alpha=1,
-                    transform=crs.PlateCarree(),
-                    zorder=5) ## Important
         plt.colorbar()
+
+        if pred_coord is not None:
+            plt.scatter(x=pred_coord[:,1], y=pred_coord[:,0],  #x=long, y=lat
+                        color="white",
+                        #c=ds/np.max(ds),
+                        s=counts/10,
+                        alpha=0.8,
+                        transform=crs.PlateCarree(),
+                        zorder=4) ## Important
+        
+        if coord_true is not None:
+            plt.scatter(x=coord_true[1], y=coord_true[0],  #x=long, y=lat
+                        color="red",
+                        #c=ds/np.max(ds),
+                        s=40,
+                        marker='*',
+                        alpha=1,
+                        transform=crs.PlateCarree(),
+                        zorder=5) ## Important
         plt.title('coordinate distribution over patches')
     
 
