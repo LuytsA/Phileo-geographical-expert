@@ -15,7 +15,7 @@ import numpy as np
 
 
 # utils
-from utils import visualise
+from utils.visualisations import visualise
 
 
 def training_loop(

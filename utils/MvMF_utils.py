@@ -237,7 +237,7 @@ class MvMF_visuals():
 
         return heatmap, pred_coord, counts
 
-    def plot_globe_dist(self, ax, dss, pred_coord=None, coord_true=None, counts=None):
+    def plot_globe_dist(self, ax, dss, pred_coord=None, coord_true=None, counts=None, linthresh=1):
         '''
         ax:  axis on which to draw probability map
         dss: global probility map for the coordinates
@@ -267,7 +267,7 @@ class MvMF_visuals():
                     alpha=0.5,
                     transform=crs.PlateCarree(),
                     zorder=1,
-                    norm=matplotlib.colors.SymLogNorm(linthresh=0.1, vmin=1e-10) ## Important
+                    norm=matplotlib.colors.SymLogNorm(linthresh=linthresh, vmin=1e-10) ## Important
             )
         plt.colorbar()
 
@@ -275,7 +275,7 @@ class MvMF_visuals():
             plt.scatter(x=pred_coord[:,1], y=pred_coord[:,0],  #x=long, y=lat
                         color="white",
                         #c=ds/np.max(ds),
-                        s=counts/10,
+                        s=counts/counts.max() * 100,
                         alpha=0.8,
                         transform=crs.PlateCarree(),
                         zorder=4) ## Important

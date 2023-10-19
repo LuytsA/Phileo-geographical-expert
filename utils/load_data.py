@@ -95,7 +95,7 @@ def load_data(x_train, y_train, x_val, y_val, x_test, y_test, with_augmentations
     ds_val = beo.Dataset(x_test, y_test,  callback=callback_encoder if encoder_only else callback_decoder) #beo.Dataset(x_val, y_val, callback=callback_encoder if encoder_only else callback_decoder)
 
     dl_train = InfiniteDataLoader(ds_train, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=num_workers, drop_last=True, generator=torch.Generator(device='cuda'))
-    dl_test = DataLoader(ds_test, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=num_workers, drop_last=True, generator=torch.Generator(device='cuda'))
-    dl_val = DataLoader(ds_val, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=num_workers, drop_last=True, generator=torch.Generator(device='cuda'))
+    dl_test = DataLoader(ds_test, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=num_workers, drop_last=True, generator=torch.Generator(device='cuda'))
+    dl_val = DataLoader(ds_val, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=num_workers, drop_last=True, generator=torch.Generator(device='cuda'))
 
     return dl_train, dl_val, dl_test
