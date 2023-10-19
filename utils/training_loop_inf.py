@@ -27,13 +27,12 @@ def training_loop_inf(
     criterion: nn.Module,
     train_loader: DataLoader,
     val_loader: DataLoader,
-    test_loader: DataLoader,
     metrics: list = None,
     lr_scheduler: str = None,
     name="model",
     out_folder="trained_models/",
-    predict_func=None,
-    visualise_validation=True
+    visualise_validation=True,
+    early_stopping=20
 ) -> None:
         
     torch.set_default_device(device)
@@ -49,24 +48,28 @@ def training_loop_inf(
     model.to(device)
     os.makedirs(out_folder, exist_ok=True)
 
-    # Loss and optimizer
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, eps=1e-06)
-    optimizer_loss = torch.optim.AdamW(criterion.coord_loss.parameters(), lr=1e-04, eps=1e-06)
+    use_MvMFLoss = False
+    optimizers ={'optimiser_model':torch.optim.AdamW(model.parameters(), lr=learning_rate, eps=1e-06)}
+    if sum(p.numel() for p in criterion.coord_loss.parameters() if p.requires_grad)>0:
+        optimizer_loss = torch.optim.AdamW(criterion.coord_loss.parameters(), lr=1e-04, eps=1e-06)
+        optimizers['optimiser_loss'] = optimizer_loss
+        use_MvMFLoss = True
+
     scaler = GradScaler()
 
     # Save the initial learning rate in optimizer's param_groups
-    for param_group in optimizer.param_groups:
+    for param_group in optimizers['optimiser_model'].param_groups:
         param_group['initial_lr'] = learning_rate
 
     if lr_scheduler == 'cosine_annealing':
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            optimizer,
+            optimizers['optimiser_model'],
             20,
             2,
             eta_min=0.000001,
         )
     elif lr_scheduler == 'reduce_on_plateau':
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[1, 2, 3, 4, 5], gamma=(10))
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizers['optimiser_model'], milestones=[1, 2, 3, 4, 5], gamma=(10))
         warmup = True
 
     best_epoch = 0
@@ -92,15 +95,11 @@ def training_loop_inf(
     train_kgl = 0.0
     train_dl = 0.0
     train_metrics_values = { metric.__name__: 0.0 for metric in metrics }
-    #with torch.autograd.detect_anomaly():
+
     for i, (images, labels) in enumerate(train_pbar):
-        if torch.isnan(images).sum() > 0:
-            np.save(f'debugging/images_nan_{i}.npy', images.detach().cpu().numpy())
-        if torch.isinf(images).sum() > 0:
-            np.save(f'debugging/images_inf_{i}.npy', images.detach().cpu().numpy())
 
         if epoch == 5 and lr_scheduler == 'reduce_on_plateau':
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.1, patience=10, min_lr=1e-6)
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizers['optimiser_model'], 'min', factor=0.1, patience=10, min_lr=1e-6)
             warmup = False
             print('Warmup finished')
 
@@ -111,12 +110,9 @@ def training_loop_inf(
         images, labels = images.to(device), labels.to(device)
 
         # Zero the gradients
-        optimizer.zero_grad()
-        optimizer_loss.zero_grad()
+        for opt in optimizers.values():
+            opt.zero_grad()
 
-        # if i%10==0:
-        #     print(torch.mean(criterion.densities))
-        #     print(torch.mean(criterion.directions))
 
         # Cast to bfloat16
         with autocast(dtype=torch.bfloat16):
@@ -124,22 +120,12 @@ def training_loop_inf(
             loss,coord_loss,kg_loss,date_loss, only_sea = criterion(outputs, labels)
             if only_sea:
                 loss = kg_loss
-                print('only sea')
-
-            if torch.isnan(loss):
-                torch.save(model.state_dict().copy(), f"debugging/{name}_last_{i}.pt")
-                np.save(f'debugging/images_{i}.npy', images.detach().cpu().numpy())
-                np.save(f'debugging/outputs_{i}.npy', outputs.detach().cpu().numpy())
-                np.save(f'debugging/loss_{i}.npy', loss.detach().cpu().numpy())
-                np.save(f'debugging/kg_loss_{i}.npy', kg_loss.detach().cpu().numpy())
-                np.save(f'debugging/label_{i}.npy', labels.detach().cpu().numpy())
-
 
             scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.step(optimizer_loss)
+            for opt in optimizers.values():
+                scaler.step(opt)
+
             scaler.update()
-            # optimizer_loss.step()
 
 
         train_loss += loss.item()
@@ -165,15 +151,12 @@ def training_loop_inf(
                 model.eval()
 
                 val_loss = 0
-
-                stop_j = int(0.01*len(val_loader))
-
                 # # visualise some validation results
                 num_visualisations = 20
                 if num_visualisations > len(val_loader):
                     num_visualisations = len(val_loader)
-                vis_batches = [i for i in range(num_visualisations)]
-                # vis_batches = [i*len(val_loader)//(num_visualisations+1) for i in range(num_visualisations)]
+                
+                vis_batches = [i*len(val_loader)//(num_visualisations+1) for i in range(num_visualisations)]
                 vis_images = []
                 vis_labels = []
                 vis_preds = []
@@ -186,11 +169,8 @@ def training_loop_inf(
                 n_sea = 0
                 for j, (images, labels) in enumerate(val_loader):
 
-                    if j> stop_j:
-                        break
                     images = images.to(device)
                     labels = labels.to(device)
-
                     outputs = model(images)
 
                     loss, coord_loss, kg_loss, date_loss, only_sea = criterion(outputs, labels)
@@ -205,18 +185,11 @@ def training_loop_inf(
                     running_kg += kg_loss.item()
                     running_date += date_loss.item()
 
-
-
-                    # if labels.shape != outputs.shape:
-                    #     outputs = unpatchify(labels.shape[0], labels.shape[1], labels.shape[2], labels.shape[3],
-                    #                          n_patches=4, tensors=outputs)
-
                     if j in vis_batches:
                         vis_images.append(images.detach().cpu().numpy()[0])
                         vis_labels.append(labels.detach().cpu().numpy()[0])
                         vis_preds.append(outputs.detach().cpu().numpy()[0])
 
-                    
                     for metric in metrics:
                         val_metrics_values[metric.__name__] += metric(outputs, labels)
             
@@ -227,13 +200,12 @@ def training_loop_inf(
                 **{name: f"{value / (steps_per_epoch):.4f}" for name, value in train_metrics_values.items()},
                 "val_l": f"{val_loss / (j + 1):.4f}","c_l": f"{running_coords / (j + 1):.4f}","t_l": f"{running_date / (j + 1):.4f}","kg_l": f"{running_kg / (j + 1):.4f}","t_l": f"{running_date / (j + 1):.4f}",
                 **{f"val_{name}": f"{value / (j + 1):.4f}" for name, value in val_metrics_values.items()},
-                #f"lr": optimizer.param_groups[0]['lr'],
             }, refresh=True)
             print('')
 
             tl.append(train_loss / (steps_per_epoch))
             vl.append(val_loss/ (j + 1))
-            lr.append(optimizer.param_groups[0]['lr'])
+            lr.append(optimizers['optimiser_model'].param_groups[0]['lr'])
 
             cl.append(running_coords/ (j + 1))
             kgl.append(running_kg/ (j + 1))
@@ -248,34 +220,32 @@ def training_loop_inf(
                 else:
                     scheduler.step(vl[-1])
 
-            # if best_loss is None:
-            #     best_epoch = epoch
-            #     best_loss = val_loss
-            #     best_model_state = model.state_dict().copy()
-            #     torch.save(best_model_state, os.path.join(out_folder, f"{name}_best.pt"))
-            #     np.save(os.path.join(out_folder, f"{name}_best_centers.npy"), criterion.coord_loss.centers.detach().cpu().numpy())
-            #     np.save(os.path.join(out_folder, f"{name}_best_densities.npy"), criterion.coord_loss.densities.detach().cpu().numpy())
+            if best_loss is None:
+                best_epoch = epoch
+                best_loss = val_loss
+                best_model_state = model.state_dict().copy()
+                torch.save(best_model_state, os.path.join(out_folder, f"{name}_best.pt"))
+                if use_MvMFLoss:
+                    np.save(os.path.join(out_folder, f"{name}_best_centers.npy"), criterion.coord_loss.centers.detach().cpu().numpy())
+                    np.save(os.path.join(out_folder, f"{name}_best_densities.npy"), criterion.coord_loss.densities.detach().cpu().numpy())
 
-            #     if predict_func is not None:
-            #         predict_func(model, epoch + 1)
+            elif best_loss > val_loss:
+                best_epoch = epoch
+                best_loss = val_loss
+                best_model_state = model.state_dict().copy()
+                torch.save(best_model_state, os.path.join(out_folder, f"{name}_best.pt"))
+                if use_MvMFLoss:
+                    np.save(os.path.join(out_folder, f"{name}_best_centers.npy"), criterion.coord_loss.centers.detach().cpu().numpy())
+                    np.save(os.path.join(out_folder, f"{name}_best_densities.npy"), criterion.coord_loss.densities.detach().cpu().numpy())
 
-            # elif best_loss > val_loss:
-            #     best_epoch = epoch
-            #     best_loss = val_loss
-            #     best_model_state = model.state_dict().copy()
-            #     torch.save(best_model_state, os.path.join(out_folder, f"{name}_best.pt"))
-            #     np.save(os.path.join(out_folder, f"{name}_best_centers.npy"), criterion.coord_loss.centers.detach().cpu().numpy())
-            #     np.save(os.path.join(out_folder, f"{name}_best_densities.npy"), criterion.coord_loss.densities.detach().cpu().numpy())
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
 
-            #     if predict_func is not None:
-            #         predict_func(model, epoch + 1)
-
-            #     epochs_no_improve = 0
-            # else:
-            #     epochs_no_improve += 1
             torch.save(model.state_dict().copy(), os.path.join(out_folder, f"{name}_last_{epoch}.pt"))
-            np.save(os.path.join(out_folder, f"{name}_last_centers_{epoch}.npy"), criterion.coord_loss.centers.detach().cpu().numpy())
-            np.save(os.path.join(out_folder, f"{name}_last_densities_{epoch}.npy"), criterion.coord_loss.densities.detach().cpu().numpy())
+            if use_MvMFLoss:
+                np.save(os.path.join(out_folder, f"{name}_last_centers.npy"), criterion.coord_loss.centers.detach().cpu().numpy())
+                np.save(os.path.join(out_folder, f"{name}_last_densities.npy"), criterion.coord_loss.densities.detach().cpu().numpy())
 
             # visualize loss & lr curves
             e.append(epoch)
@@ -303,8 +273,9 @@ def training_loop_inf(
             plt.close('all')
 
             if visualise_validation:
+                centers = criterion.coord_loss.centers.detach().cpu().numpy() if use_MvMFLoss else None
                 visualise(vis_images, np.squeeze(vis_labels), np.squeeze(vis_preds), images=num_visualisations,
-                            channel_first=True, vmin=0, vmax=1, save_path=os.path.join(save_dir, f"val_pred_{epoch}.png"), centers=criterion.coord_loss.centers.detach().cpu().numpy())
+                            channel_first=True, vmin=0, vmax=1, save_path=os.path.join(save_dir, f"val_pred_{epoch}.png"), centers=centers)
             
             # reset train values and up the epoch
             epoch += 1
@@ -319,8 +290,8 @@ def training_loop_inf(
             train_pbar.set_description(desc=f"Infinite loader with {steps_per_epoch} steps_per_epoch, epoch={epoch}", refresh=False)
 
 
-            #
-            # # Early stopping
-            # if epochs_no_improve == patience_calculator(epoch, t_0, t_mult, max_patience):
-            #     print(f'Early stopping triggered after {epoch + 1} epochs.')
-            #     break
+            # Early stopping
+            if epochs_no_improve == early_stopping:
+                print(f'Early stopping triggered after {epoch + 1} epochs.')
+                print('Best epoch: ',best_epoch)
+                break

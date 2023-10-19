@@ -77,22 +77,17 @@ def visualise(x, y, y_pred=None, images=5, channel_first=False, vmin=0, vmax=1, 
         i = i + 1
         fig.add_subplot(rows, columns, i)
 
-        coord_pred_center, coord_true = y_pred[idx,pos_feature_pred['coords']], y[idx,pos_feature_label['coords']]
+        coord_pred, coord_true = y_pred[idx,pos_feature_pred['coords']], y[idx,pos_feature_label['coords']]
         kg_pred_logits,kg_true = y_pred[idx,pos_feature_pred['kg']], y[idx,pos_feature_label['kg']]
         date_pred,date_true = y_pred[idx,pos_feature_pred['date']], y[idx,pos_feature_label['date']]
-        # coord_true = y[idx,pos_feature_label['coords']]
 
-        # print(y_pred[idx])
-        # print(y_pred[idx].shape)
+        if centers is not None:
+            nearest_center = centers[np.argmax(coord_pred)]
+            lat_pred,long_pred = nearest_center 
+        else:
+            lat_pred, long_pred = decode_coordinates(coord_pred)
+        print(decode_coordinates(coord_pred))
 
-
-
-        nearest_center = centers[np.argmax(coord_pred_center)]
-
-        # c_soft = np.exp(coord_pred_center[idx])/np.sum(np.exp(coord_pred_center[idx]),keepdims=True)
-        # nearest_center_soft = centers[np.argmax(c_soft)]
-        lat_pred,long_pred = nearest_center #decode_coordinates(nearest_center)#coord_pred)
-        
 
         lat,long = decode_coordinates(coord_true)
         doy_pred, doy = decode_date(date_pred), decode_date(date_true)
