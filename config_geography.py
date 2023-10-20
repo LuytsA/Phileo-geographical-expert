@@ -1,7 +1,7 @@
 USE_MvMFloss = True
 if USE_MvMFloss:
     import numpy as np
-    centers = np.load('centers_ltlng_train_locations.npy') 
+    centers = np.load('centers_ltlng_random_close_to_train.npy') #np.load('centers_ltlng_train_locations.npy') np.load('centers_ltlng_random_land.npy') 
     coord_pos_pred = [31 + i for i in range(len(centers)) ]
     date_pos_pred = [max(coord_pos_pred)+1, max(coord_pos_pred)+2]
 else:
